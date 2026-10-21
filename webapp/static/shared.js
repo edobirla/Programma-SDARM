@@ -88,7 +88,16 @@ window.slideHTML = (slide, idx, edit) => {
   const scale = (edit && edit.scale) || 1;
   const override = edit && edit.texts && edit.texts[idx] != null ? edit.texts[idx] : null;
   const main = override != null ? window.mainBox(slide) : -1;
-  return slide.map((s, i) => {
+  // modifiche ai singoli riquadri (presentazioni e PDF): {"diapositiva.forma": {lines, f, k, c, a, b}}
+  const boxes = (edit && edit.boxes) || {};
+  // PDF: si vede la pagina originale; i testi modificati si tolgono dalla pagina e li disegna l'app
+  const cut = slide.map((s, k) => (s.pt && boxes[idx + '.' + k] ? k : -1)).filter((k) => k >= 0);
+  return slide.map((s0, i) => {
+    if (s0.pt && !boxes[idx + '.' + i]) return '';
+    if (s0.bgo && cut.length && s0.src) return window.NO_MEDIA ? '' : `<img alt="" src="/api/pdfcut?p=${encodeURIComponent(s0.src)}&n=${s0.n}&cut=${cut.join(',')}" style="position:absolute;inset:0;width:100%;height:100%">`;
+    const bx = boxes[idx + '.' + i];
+    const s = bx && bx.b ? Object.assign({}, s0, { x: bx.b[0], y: bx.b[1], w: bx.b[2], h: bx.b[3] }) : s0;
+    const sc = scale * ((bx && bx.k) || 1);
     const pos = `position:absolute;left:${s.x * 100}%;top:${s.y * 100}%;width:${s.w * 100}%;height:${s.h * 100}%;`;
     const rot = s.rot ? `rotate(${s.rot}deg) ` : '', flip = s.flip ? `scale(${s.flip[0] ? -1 : 1},${s.flip[1] ? -1 : 1})` : '';
     const box = pos + (rot ? `transform:${rot};` : '');
@@ -103,13 +112,16 @@ window.slideHTML = (slide, idx, edit) => {
       const t = s.text, pad = s.pad || [0, 0, 0, 0];
       let paras = t.paras;
       // testo modificato: righe semplici (vecchie modifiche) o righe con corsivo/grassetto/colore
-      if (i === main) { const p0 = t.paras[0] || {}, r0 = (p0.runs && p0.runs[0]) || { s: 0.08, f: '', c: '#fff' };
-        const lines = Array.isArray(override) ? override : override.split('\n').map((line) => [{ t: line }]);
-        paras = lines.map((runs) => Object.assign({}, p0, { bu: null, a: p0.a || 'center', s: r0.s, runs: runs.map((r) => Object.assign({}, r0, r.i == null ? {} : { i: r.i, b: r.b }, { t: r.t, c: r.c || r0.c })) })); }
+      if (i === main) paras = window.linesToParas(Array.isArray(override) ? override : override.split('\n').map((line) => [{ t: line }]), t.paras, true);
+      if (bx) {
+        if (bx.lines) paras = window.linesToParas(bx.lines, t.paras, false);
+        if (bx.f || bx.c || bx.a) paras = paras.map((p) => Object.assign({}, p, bx.a ? { a: bx.a } : {},
+          { runs: p.runs.map((r) => Object.assign({}, r, bx.f ? { f: bx.f } : {}, bx.c ? { c: bx.c } : {})) }));
+      }
       const para = (p) => {
-        const st = `text-align:${p.a};font-size:calc(${p.s * scale * 100}cqh * var(--af, 1));min-height:1em;flex-shrink:0;`
-          + (p.lha ? `line-height:calc(${p.lha * scale * 100}cqh * var(--af, 1));` : p.lh ? `line-height:${p.lh};` : '')
-          + (p.sb ? `margin-top:${p.sb * scale * 100}cqh;` : '') + (p.sa ? `margin-bottom:${p.sa * scale * 100}cqh;` : '')
+        const st = `text-align:${p.a};font-size:calc(${p.s * sc * 100}cqh * var(--af, 1));min-height:1em;flex-shrink:0;`
+          + (p.lha ? `line-height:calc(${p.lha * sc * 100}cqh * var(--af, 1));` : p.lh ? `line-height:${p.lh};` : '')
+          + (p.sb ? `margin-top:${p.sb * sc * 100}cqh;` : '') + (p.sa ? `margin-bottom:${p.sa * sc * 100}cqh;` : '')
           + (p.ml || p.ind ? `padding-left:${p.ml * 100}cqw;text-indent:${p.ind * 100}cqw;` : '');
         const bu = p.bu ? `<span style="display:inline-block;text-indent:0;${p.ind < 0 ? `min-width:${-p.ind * 100}cqw;` : 'margin-right:.4em;'}color:${p.bu.c};font-size:${p.bu.s * 100}%">${e(p.bu.t)}</span>` : '';
         return `<div style="${st}">${bu}${p.runs.map((r) => `<span style="font-size:${(r.s / (p.s || r.s || 1)) * 100}%;font-family:'${e(r.f)}','Helvetica Neue',Helvetica,sans-serif;${r.b ? 'font-weight:700;' : ''}${r.i ? 'font-style:italic;' : ''}${r.cap ? 'text-transform:uppercase;' : ''}${r.u ? 'text-decoration:underline;' : ''}${r.bl ? `vertical-align:${r.bl * 100}%;font-size:${(r.s / (p.s || r.s || 1)) * 66}%;` : ''}${r.c ? 'color:' + r.c : ''}">${e(r.t)}</span>`).join('')}</div>`;
@@ -121,6 +133,12 @@ window.slideHTML = (slide, idx, edit) => {
   }).join('');
 };
 
+/* righe scritte nell'editor → paragrafi: ogni riga prende lo stile del paragrafo
+   originale nella stessa posizione (punto elenco, rientri, carattere) */
+window.linesToParas = (lines, orig, plain) => lines.map((runs, j) => {
+  const p0 = orig[Math.min(j, orig.length - 1)] || {}, r0 = (p0.runs && p0.runs.find((r) => r.t.trim())) || (orig[0] && orig[0].runs[0]) || { s: 0.08, f: '', c: '#fff' };
+  return Object.assign({}, p0, plain ? { bu: null, a: p0.a || 'center' } : {}, { s: r0.s, runs: runs.map((r) => Object.assign({}, r0, r.i == null ? {} : { i: r.i, b: r.b }, { t: r.t, c: r.c || r0.c })) });
+});
 /* riquadri con «adatta il testo alla forma»: se il testo esce, si rimpicciolisce
    finché ci sta (come fa PowerPoint). Vale ovunque si disegnino diapositive. */
 window.fitSlideText = (all) => document.querySelectorAll(all ? '.sl-text.af' : '.sl-text.af:not([data-fit])').forEach((el) => {

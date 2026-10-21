@@ -549,6 +549,95 @@ document.addEventListener('input', (e) => {
   $('#hePrev').innerHTML = thumb(he.data, he.i, edit);
   const t = $(`#heThumbs [data-i="${he.i}"]`); if (t) t.innerHTML = thumb(he.data, he.i, edit);
 });
+/* editor delle presentazioni (PowerPoint e PDF): si sceglie un testo
+   nell'anteprima e se ne cambiano testo, carattere, dimensione, colore,
+   allineamento e posizione. Il file originale non viene toccato. */
+const deKey = () => S.de.i + '.' + S.de.sel;
+const deBox = () => (S.de.boxes[deKey()] = S.de.boxes[deKey()] || {});
+const deEdit = () => Object.assign({}, S.de.base, { boxes: S.de.boxes });
+function deLines() {
+  const de = S.de, bx = de.boxes[deKey()], sh = de.data.slides[de.i][de.sel];
+  if (bx && bx.lines) return bx.lines;
+  return sh && sh.text ? sh.text.paras.map((p) => p.runs.filter((r) => r.t && r.t !== '\n').map((r) => ({ t: r.t, i: !!r.i, b: !!r.b, c: r.c || '' }))) : [];
+}
+function deOverlay() {
+  const de = S.de, sl = de.data.slides[de.i];
+  $('#deOv').innerHTML = sl.map((sh, k) => {
+    if (!sh.text || sh.m) return '';
+    const b = (de.boxes[de.i + '.' + k] || {}).b || [sh.x, sh.y, sh.w, sh.h], on = k === de.sel;
+    return `<div data-debox="${k}" style="position:absolute;left:${b[0] * 100}%;top:${b[1] * 100}%;width:${b[2] * 100}%;height:${b[3] * 100}%;box-sizing:border-box;cursor:move;
+      border:${on ? '2px solid var(--accent)' : '1.5px dashed rgba(90,150,255,.85)'};border-radius:3px;${on ? 'background:rgba(80,140,255,.10)' : ''}">
+      ${on ? '<span data-dehandle="1" style="position:absolute;right:-7px;bottom:-7px;width:14px;height:14px;border-radius:7px;background:var(--accent);box-shadow:0 0 0 2px rgba(0,0,0,.5);cursor:nwse-resize"></span>' : ''}</div>`;
+  }).join('');
+}
+function deRefresh(all) {
+  const de = S.de, ed = deEdit();
+  $('#dePrevSlide').innerHTML = thumb(de.data, de.i, ed);
+  const t = $(`#deThumbs [data-i="${de.i}"]`); if (t) t.innerHTML = thumb(de.data, de.i, ed);
+  deOverlay();
+  if (all) deControls();
+}
+function deControls() {
+  const de = S.de, el = $('#deCtl');
+  if (de.sel == null) { el.innerHTML = '<div style="color:var(--faint);padding:12px 0">Clicca un testo nell\'anteprima per modificarlo. Trascinalo per spostarlo, il pallino in basso a destra lo ingrandisce.</div>'; return; }
+  const sh = de.data.slides[de.i][de.sel], bx = de.boxes[deKey()] || {}, r0 = (sh.text.paras.flatMap((p) => p.runs).find((r) => r.t.trim())) || {};
+  const font = bx.f || r0.f || 'Helvetica', col = bx.c || (/^#[0-9a-f]{6}$/i.test(r0.c || '') ? r0.c : '#ffffff'), k = Math.round((bx.k || 1) * 100), al = bx.a || sh.text.paras[0].a;
+  el.innerHTML = `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+      <button class="btn sm" data-a="deFmt" data-v="italic" style="font-style:italic;font-family:Georgia,serif;width:38px" title="Corsivo">I</button>
+      <button class="btn sm" data-a="deFmt" data-v="bold" style="font-weight:800;width:38px" title="Grassetto">B</button>
+      <div class="seg">${[['left', 'Sinistra'], ['center', 'Centro'], ['right', 'Destra'], ['justify', 'Giustificato']].map(([v, l]) => `<button class="${al === v ? 'on' : ''}" data-a="deAlign" data-v="${v}">${l}</button>`).join('')}</div>
+      <input type="color" id="deColor" value="${esc(col)}" title="Colore del testo" style="width:40px;height:32px;border:0;background:none">
+      ${fontSel(font, 'id="deFont"')}
+      <label style="display:flex;align-items:center;gap:8px;font-weight:650;font-size:13px">Dimensione<input type="range" id="deSize" min="30" max="250" value="${k}" style="width:120px"><span id="deSizeV" style="width:40px;color:var(--sub)">${k}%</span></label>
+      <button class="btn sm" data-a="deResetBox">Ripristina questo testo</button></div>
+    <div class="field" id="deText" contenteditable="true" spellcheck="false" style="height:84px;overflow:auto;padding:10px 12px;line-height:1.45;font-size:15px;background:#1c1e2a;color:#fff;margin-top:8px"></div>`;
+  $('#deText').innerHTML = heLinesHtml(deLines());
+  // testo scuro: il campo diventa chiaro, così si legge
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(col);
+  if (m && (0.3 * parseInt(m[1], 16) + 0.59 * parseInt(m[2], 16) + 0.11 * parseInt(m[3], 16)) < 110) Object.assign($('#deText').style, { background: '#f2f2f5', color: '#111' });
+}
+function renderDeckEditor() {
+  const de = S.de, data = de.data, ed = deEdit();
+  modal(`<div style="display:flex;align-items:baseline;gap:10px"><span style="font-size:19px;font-weight:750;flex:1">Modifica ${data.pdf ? 'PDF' : 'presentazione'}</span><span style="color:var(--faint);font-size:12px">Il file originale non viene toccato</span></div>
+    <div style="display:flex;gap:16px;min-height:0">
+      <div class="scr" id="deThumbs" style="width:150px;flex-shrink:0;display:flex;flex-direction:column;gap:8px;max-height:66vh">${data.slides.map((_, k) => `<button class="slide-btn ${k === de.i ? 'live' : ''}" data-a="deSlide" data-i="${k}">${thumb(data, k, ed)}</button>`).join('')}</div>
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:8px">
+        <div id="dePrev" style="position:relative;user-select:none;width:min(100%, calc(42vh * ${data.ratio}));align-self:center"><div id="dePrevSlide"></div><div id="deOv" style="position:absolute;inset:0"></div></div>
+        <div id="deCtl"></div>
+      </div></div>
+    <div style="display:flex;gap:8px"><button class="btn" data-a="deResetAll">Ripristina tutto</button><span style="flex:1"></span><button class="btn" data-a="closeModal">Annulla</button><button class="btn pri" data-a="deSave">Salva</button></div>`, 1060);
+  $('#dePrevSlide').innerHTML = thumb(data, de.i, ed);
+  deOverlay(); deControls();
+}
+document.addEventListener('input', (e) => {
+  if (!S.de || !e.target.closest || !e.target.closest('#deCtl')) return;
+  const bx = deBox();
+  if (e.target.id === 'deText') bx.lines = heRead(e.target);
+  else if (e.target.id === 'deSize') { bx.k = e.target.value / 100; $('#deSizeV').textContent = e.target.value + '%'; }
+  else if (e.target.id === 'deColor') bx.c = e.target.value;
+  else return;
+  deRefresh();
+});
+document.addEventListener('change', (e) => { if (S.de && e.target.id === 'deFont') { deBox().f = e.target.value; deRefresh(); } });
+document.addEventListener('mousedown', (e) => { if (e.target.closest('[data-a="deFmt"]')) e.preventDefault(); });
+// scegliere, spostare e ridimensionare i testi sull'anteprima
+document.addEventListener('pointerdown', (e) => {
+  const t = S.de && e.target.closest && e.target.closest('[data-debox]'); if (!t) return;
+  e.preventDefault();
+  const de = S.de, k = +t.dataset.debox, sh = de.data.slides[de.i][k], ov = $('#deOv').getBoundingClientRect();
+  if (de.sel !== k) { de.sel = k; deOverlay(); deControls(); }
+  const start = ((de.boxes[de.i + '.' + k] || {}).b || [sh.x, sh.y, sh.w, sh.h]).slice(), x0 = e.clientX, y0 = e.clientY, resize = !!e.target.dataset.dehandle;
+  let moved = false;
+  const mv = (ev) => {
+    const dx = (ev.clientX - x0) / ov.width, dy = (ev.clientY - y0) / ov.height; if (!moved && Math.abs(ev.clientX - x0) + Math.abs(ev.clientY - y0) < 3) return;
+    moved = true;
+    deBox().b = resize ? [start[0], start[1], Math.max(0.03, start[2] + dx), Math.max(0.03, start[3] + dy)] : [start[0] + dx, start[1] + dy, start[2], start[3]];
+    deRefresh();
+  };
+  const up = () => { document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); };
+  document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up);
+});
+
 /* diapositive vere dell'inno, disegnate dal PowerPoint */
 S.slidesCache = {};
 async function getSlides(p) {
@@ -702,8 +791,8 @@ function detDeck(sl) {
   const p = sl.data.path;
   if (!p) return `<div style="display:flex;gap:8px">${pickBtn(sl, 'Scegli PowerPoint o PDF…')}</div>`;
   const live = S.live.kind === 'deck' && S.live.file === p ? S.live.i : -1;
-  return `<div class="slides" ${/\.pdf$/i.test(p) ? 'data-pdf' : 'data-thumbs'}="${esc(p)}" data-id="${sl.id}" data-act="projDeck" data-live="${live}"></div>
-    <div class="det-acts"><button class="btn pri" data-a="projDeck" data-id="${sl.id}" data-i="0">Proietta dall'inizio</button>${pickBtn(sl)}</div>`;
+  return `<div class="slides" ${/\.pdf$/i.test(p) && !hymnEdit(p) ? 'data-pdf' : 'data-thumbs'}="${esc(p)}" data-id="${sl.id}" data-act="projDeck" data-live="${live}"></div>
+    <div class="det-acts"><button class="btn pri" data-a="projDeck" data-id="${sl.id}" data-i="0">Proietta dall'inizio</button>${REMOTE ? '' : `<button class="btn" data-a="editDeck" data-p="${esc(p)}">${svg('pen', 14)}Modifica testi</button>`}${pickBtn(sl)}</div>`;
 }
 function detVideo(sl) {
   const p = sl.data.path;
@@ -1194,14 +1283,14 @@ async function projHymn(h, i, slotId) {
 async function projDeck(id, i) {
   const [, sl] = findSlot(id), p = sl.data.path, name = slotTitle(sl);
   const base = { kind: 'deck', file: p, slotId: id, label: name };
-  if (/\.pdf$/i.test(p)) {
+  if (/\.pdf$/i.test(p) && !hymnEdit(p)) {
     const pages = await getPdf(p); if (!pages.length) return toast('Questo PDF non si legge');
     i = Math.max(0, Math.min(pages.length - 1, i));
     setLive(Object.assign(base, { style: 'image', pages, image: pages[i], i, count: pages.length, sub: 'Pagina ' + (i + 1) + ' di ' + pages.length }));
   } else {
     const data = await getSlides(p); if (!data) return toast('Questo file non si legge: aprilo in PowerPoint o Keynote e salvalo come .pptx');
     i = Math.max(0, Math.min(data.slides.length - 1, i));
-    setLive(Object.assign(base, { style: 'pptx', texts: data.text, main: data.text[i] || '', i, count: data.slides.length, sub: 'Diapositiva ' + (i + 1) + ' di ' + data.slides.length }));
+    setLive(Object.assign(base, { style: 'pptx', edit: hymnEdit(p), texts: data.text, main: data.text[i] || '', i, count: data.slides.length, sub: (data.pdf ? 'Pagina ' : 'Diapositiva ') + (i + 1) + ' di ' + data.slides.length }));
   }
   $$('[data-act="projDeck"] .slide-btn, [data-pdf] .slide-btn').forEach((b) => b.classList.toggle('live', +b.dataset.i === i));
 }
@@ -1682,6 +1771,23 @@ const act = {
     renderHymnEditor();
   },
   heSlide: (el, d) => { S.he.i = +d.i; S.he.confirm = -1; heShow(); },
+  editDeck: async (el, d) => {
+    toast(/\.pdf$/i.test(d.p) ? 'Preparo il PDF da modificare…' : 'Apro la presentazione…');
+    const data = await getSlides(d.p); if (!data) return toast('Questo file non si legge');
+    const base = Object.assign({}, hymnEdit(d.p) || {}), boxes = JSON.parse(JSON.stringify(base.boxes || {})); delete base.boxes;
+    S.de = { path: d.p, data, i: 0, sel: null, boxes, base }; renderDeckEditor(); },
+  deSlide: (el, d) => { S.de.i = +d.i; S.de.sel = null; $$('#deThumbs [data-i]').forEach((b) => b.classList.toggle('live', +b.dataset.i === S.de.i)); deRefresh(true); },
+  deFmt: (el, d) => { const t = $('#deText'); t.focus(); document.execCommand(d.v); deBox().lines = heRead(t); deRefresh(); },
+  deAlign: (el, d) => { deBox().a = d.v; $$('#deCtl [data-a="deAlign"]').forEach((b) => b.classList.toggle('on', b.dataset.v === d.v)); deRefresh(); },
+  deResetBox: () => { delete S.de.boxes[deKey()]; deRefresh(true); },
+  deResetAll: () => { S.de.boxes = {}; S.de.sel = null; renderDeckEditor(); },
+  deSave: async () => { const de = S.de, ed = Object.assign({}, S.settings.hymn_edits || {});
+    const boxes = {}; Object.entries(de.boxes).forEach(([k, v]) => { if (Object.keys(v).length) boxes[k] = v; });
+    const next = Object.assign({}, de.base, Object.keys(boxes).length ? { boxes } : {});
+    if (!Object.keys(next).length || (!next.boxes && !Object.keys(next.texts || {}).length && (next.scale || 1) === 1)) delete ed[de.path]; else ed[de.path] = next;
+    await setSetting('hymn_edits', ed); S.de = null; closeModal(); toast('Salvato · il file originale resta com\'era');
+    if (S.live.kind === 'deck' && S.live.file === de.path) projDeck(S.live.slotId, S.live.i);
+    renderMain(); },
   heFmt: (el, d) => { const t = $('#heText'); t.focus(); document.execCommand(d.v); S.he.texts[S.he.i] = heRead(t); $('#hePrev').innerHTML = thumb(S.he.data, S.he.i, { scale: S.he.scale, texts: S.he.texts }); },
   heDel: async () => { const he = S.he, i = he.i;
     if (he.data.slides.length < 2) return toast('Un inno deve avere almeno una diapositiva');

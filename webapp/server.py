@@ -47,7 +47,7 @@ from pptx import Presentation              # noqa: E402
 STATIC = os.path.join(ROOT, "webapp", "static")
 ASSETS = os.path.join(ROOT, "assets")
 PORT = int(os.environ.get("SDARM_PORT") or os.environ.get("PORT") or "8765")
-VERSION = "2.0.2"
+VERSION = "2.0.3"
 # identifica questa copia dell'app: l'avvio spegne i motori di versioni precedenti
 BUILD = str(int(os.path.getmtime(sys.executable if FROZEN else os.path.abspath(__file__))))
 AUDIO_EXT = (".mp3", ".m4a", ".wav", ".ogg", ".aac", ".flac")
@@ -840,9 +840,26 @@ class Handler(BaseHTTPRequestHandler):
                                for b, c, v, t in res])
         if p == "/api/slides":
             try:
-                return self._json(pptx_render.describe(R(q.get("p", "")), SLIDES))
+                d = pptx_render.describe(R(q.get("p", "")), SLIDES)
+                if d.get("pdf"):                    # l'uscita chiede le pagine con i testi modificati tolti
+                    for sl in d["slides"]:
+                        sl[0]["src"] = q.get("p", "")
+                return self._json(d)
             except Exception as ex:      # file rotto: l'uscita usa il testo
                 return self._json({"error": str(ex)}, 422)
+        if p == "/api/pdfcut":
+            # pagina di un PDF senza le scritte dei riquadri modificati (cache)
+            src = os.path.realpath(R(q.get("p", "")))
+            if not self._local() and not src.startswith(os.path.realpath(DATA) + os.sep):
+                return self.send_error(403)
+            n = int(q.get("n", "0"))
+            cut = sorted({int(x) for x in q.get("cut", "").split(",") if x.isdigit()})
+            shapes = pptx_render.describe(src, SLIDES)["slides"][n]
+            key = shapes[0]["img"].split("/")[0]
+            out = os.path.join(SLIDES, key, f"cut{n:04d}-{'-'.join(map(str, cut))}.png")
+            if not os.path.isfile(out):
+                pptx_render.pdf_cut(src, n, [shapes[i]["bb"] for i in cut if i < len(shapes) and "bb" in shapes[i]], out)
+            return self._file(out)
         if p == "/api/pdf":
             # pagine del PDF come immagini, una volta sola (cache)
             import fitz

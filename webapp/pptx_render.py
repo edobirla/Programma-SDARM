@@ -22,7 +22,7 @@ P = "{http://schemas.openxmlformats.org/presentationml/2006/main}"
 R = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
 MC = "{http://schemas.openxmlformats.org/markup-compatibility/2006}"
 R_EMBED = R + "embed"
-CACHE_VERSION = 5
+CACHE_VERSION = 6
 
 COLOR_TAGS = {A + t for t in ("srgbClr", "schemeClr", "sysClr", "prstClr", "scrgbClr", "hslClr")}
 PRESET = {"black": "000000", "white": "FFFFFF", "red": "FF0000", "green": "008000", "blue": "0000FF", "yellow": "FFFF00",
@@ -845,6 +845,11 @@ def describe(path, cache_root):
         with open(jpath, encoding="utf-8") as f:
             return json.load(f)
     os.makedirs(out_dir, exist_ok=True)
+    if path.lower().endswith(".pdf"):
+        data = describe_pdf(path, out_dir, key)
+        with open(jpath, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+        return data
     prs = Presentation(path)
     deck = Deck(prs, out_dir, key)
     slides, texts, trans = [], [], []
@@ -894,6 +899,83 @@ def describe(path, cache_root):
     with open(jpath, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False)
     return data
+
+
+def _pdf_font(name, flags):
+    """«ABCDEF+Georgia-BoldItalic» → ("Georgia", grassetto, corsivo)."""
+    name = name.split("+")[-1]
+    fam, _, style = name.partition("-")
+    fam = re.sub(r"(MT|PS|PSMT|Std|Pro)$", "", fam)
+    fam = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", fam).replace(",", " ").strip() or "Helvetica"
+    low = (style + name).lower()
+    return fam, bool(flags & 16) or "bold" in low or "black" in low, bool(flags & 2) or "italic" in low or "oblique" in low
+
+
+def describe_pdf(path, out_dir, key):
+    """Un PDF come diapositive: l'immagine della pagina com'è, più i suoi testi
+    (posizione, carattere, dimensione, colore) da poter modificare. I testi non
+    toccati restano quelli dell'immagine; per quelli modificati la pagina si
+    ridisegna senza quelle scritte (pdf_cut) e sopra va il testo nuovo."""
+    import fitz
+    slides, texts = [], []
+    ratio = 16 / 9
+    with fitz.open(path) as doc:
+        for n, page in enumerate(doc):
+            W, Hp = page.rect.width or 1, page.rect.height or 1
+            if n == 0:
+                ratio = W / Hp
+            z = 1920 / W
+            orig = f"p{n:04d}.png"
+            page.get_pixmap(matrix=fitz.Matrix(z, z)).save(os.path.join(out_dir, orig))
+            shapes = [{"x": 0, "y": 0, "w": 1, "h": 1, "rot": 0, "m": 1, "bgo": 1, "n": n, "img": key + "/" + orig,
+                       "svg": f'<svg viewBox="0 0 {W} {Hp}" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%"><image href="{{IMG}}{key}/{orig}" width="{W}" height="{Hp}" preserveAspectRatio="none"/></svg>'}]
+            all_text = []
+            for b in page.get_text("dict")["blocks"]:
+                if b.get("type") != 0:
+                    continue
+                paras, base = [], []
+                for ln in b["lines"]:
+                    runs = []
+                    for sp in ln["spans"]:
+                        if not sp["text"]:
+                            continue
+                        fam, bold, ital = _pdf_font(sp["font"], sp["flags"])
+                        runs.append({"t": sp["text"], "s": round(sp["size"] / Hp, 5), "f": fam, "b": bold, "i": ital,
+                                     "c": "#%06X" % (sp["color"] & 0xFFFFFF)})
+                    if runs and "".join(r["t"] for r in runs).strip():
+                        paras.append({"a": "left", "runs": runs, "s": max(r["s"] for r in runs)})
+                        base.append(ln["bbox"][1])
+                if not paras:
+                    continue
+                x0, y0, x1, y1 = b["bbox"]
+                gaps = sorted(b2 - b1 for b1, b2 in zip(base, base[1:]) if b2 > b1)
+                if gaps:
+                    lh = gaps[len(gaps) // 2] / Hp            # interlinea come nel PDF
+                    for p in paras:
+                        p["lha"] = round(lh, 5)
+                pad = 0.002
+                shapes.append({"x": x0 / W - pad, "y": y0 / Hp - pad, "w": (x1 - x0) / W + 2 * pad + 0.01, "h": (y1 - y0) / Hp + 2 * pad, "rot": 0,
+                               "pt": 1, "bb": [round(v, 2) for v in b["bbox"]], "pad": [pad, pad, pad, pad],
+                               "text": {"anchor": "flex-start", "pad": [0, 0, 0, 0], "nowrap": True, "paras": paras}})
+                all_text.append("\n".join("".join(r["t"] for r in p["runs"]) for p in paras))
+            slides.append(shapes)
+            texts.append("\n".join(all_text).strip())
+    return {"ratio": ratio, "slides": slides, "text": texts, "pdf": True}
+
+
+def pdf_cut(path, n, rects, out_png):
+    """La pagina n senza le scritte dei riquadri modificati (foto e disegni restano)."""
+    import fitz
+    with fitz.open(path) as doc:
+        pg = doc[n]
+        for r in rects:
+            pg.add_redact_annot(fitz.Rect(r), fill=False)
+        try:
+            pg.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE, graphics=fitz.PDF_REDACT_LINE_ART_NONE)
+        except TypeError:
+            pg.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
+        z = 1920 / (pg.rect.width or 1)
+        pg.get_pixmap(matrix=fitz.Matrix(z, z)).save(out_png)
 
 
 if __name__ == "__main__":   # self-check su un inno di prova
