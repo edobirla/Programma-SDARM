@@ -12,18 +12,13 @@
 > v1 = old customtkinter desktop app on `main` (Windows build, still installed in church, gets nothing from v2).
 > v2 = this webapp-style Mac app. Everything below is committed on branch `webapp` (last commit 9c9c132).
 
-### ▶ NEXT STEP (user asked for this in a new chat)
-**Publish v2 on GitHub in a NEW repository** (not the existing `edobirla/Gestione-programma-SDARM`, which stays v1).
-Ask the user only: repo name and public/private. Then:
-1. Decide contents: v2 needs `webapp/`, `core/`, `assets/`, `bibles/*.db`, `.github/workflows/build-mac.yml`,
-   `.gitignore`, `HANDOFF.md`. Old v1-only stuff (`ui/`, `main.py`, `packaging/`, `LND1991.*`, `design*`, `file test/`,
-   `screenshot app/`, `dist/`) should NOT go in (check sizes; `file test/` holds the user's real hymnals — never publish).
-   Simplest: a fresh repo from a clean copy (no v1 history), or `git subtree`/filtered history — ask nothing, pick fresh.
-2. Change `REPO` in `webapp/server.py` (update checker) to the new repo.
-3. `gh repo create`, push, then a release: bump nothing (VERSION "2.0"), `git tag -a v2.0 -m "notes"`, push tag →
-   workflow builds `Programma-SDARM-2.0-mac.zip` (Apple Silicon, ad-hoc signed) and publishes the Release.
-   Verify the Actions run (macos-14 runner) succeeds; pywebview + pyobjc are in `webapp/requirements.txt`.
-4. Never commit `.claude/launch.json` (local test config). Commit trailer: `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
+### ▶ Repository (done 2026-10-21)
+v2 now lives in its own PUBLIC repo **edobirla/Programma-SDARM** (fresh history, branch `main`). Develop here, not on the
+old repo's `webapp` branch. `REPO` in `webapp/server.py` points here. Release = bump `VERSION`, `git tag -a v2.x -m "notes"`,
+push the tag → `build-mac.yml` builds and publishes `Programma-SDARM-<ver>-mac.zip`. Never commit `.claude/launch.json`.
+Not in the repo (stay on the old Mac): `PROMPT lezioni e grafiche.md`, `grafiche lezione/`, `lezionario_T4_2026.json`, `logo bianco.png`.
+Latest changes: question reference is its own box («Riferimento» in Grafiche › Domanda, movable/resizable, own max size);
+paused timer freezes on the projector (`paused` field in live state; `timerLive()` in app.js), ± while paused adds to remaining.
 
 ### Architecture
 - `webapp/app_main.py` — launcher (the .app entry). Kills stale engines of older builds (port scan 8765+, `X-SDARM-Build`
