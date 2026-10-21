@@ -80,29 +80,61 @@ window.boxesOf = (prof, name) => {
    Il contenitore deve avere container-type: size: le dimensioni dei testi
    sono in cqh (frazioni dell'altezza), le posizioni in %. `edit` applica le
    modifiche fatte nell'app: {scale, texts: {indice: "testo"}}. */
-/* il riquadro col testo dell'inno: quello con più pezzi di testo */
-window.mainBox = (slide) => { let best = -1, main = -1; slide.forEach((s, i) => { const n = s.text ? s.text.paras.reduce((a, p) => a + p.runs.length, 0) : 0; if (n > best) { best = n; main = i; } }); return main; };
+/* il riquadro col testo dell'inno: quello con più pezzi di testo (non quelli di schema e layout) */
+window.mainBox = (slide) => { let best = -1, main = -1; slide.forEach((s, i) => { const n = s.text && !s.m ? s.text.paras.reduce((a, p) => a + p.runs.length, 0) : 0; if (n > best) { best = n; main = i; } }); return main; };
+const SLIDE_IMG = '/media?p=' + encodeURIComponent('@/cache/slides/');
 window.slideHTML = (slide, idx, edit) => {
   const e = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const scale = (edit && edit.scale) || 1;
   const override = edit && edit.texts && edit.texts[idx] != null ? edit.texts[idx] : null;
   const main = override != null ? window.mainBox(slide) : -1;
   return slide.map((s, i) => {
-    const box = `position:absolute;left:${s.x * 100}%;top:${s.y * 100}%;width:${s.w * 100}%;height:${s.h * 100}%;${s.rot ? `transform:rotate(${s.rot}deg);` : ''}`;
+    const pos = `position:absolute;left:${s.x * 100}%;top:${s.y * 100}%;width:${s.w * 100}%;height:${s.h * 100}%;`;
+    const rot = s.rot ? `rotate(${s.rot}deg) ` : '', flip = s.flip ? `scale(${s.flip[0] ? -1 : 1},${s.flip[1] ? -1 : 1})` : '';
+    const box = pos + (rot ? `transform:${rot};` : '');
     let html = '';
-    if (s.fill) html += `<div style="${box}background:${s.fill}"></div>`;
-    if (s.img && !window.NO_MEDIA) html += `<img src="/media?p=${encodeURIComponent('@/cache/slides/' + s.img)}" alt="" style="${box}object-fit:fill">`;
+    // forma già disegnata dal motore (sfondi, sfumature, foto ritagliate, forme libere, contorni)
+    if (s.svg) html += `<div style="${pos}${rot || flip ? `transform:${rot}${flip};` : ''}${s.fx ? `filter:${s.fx};` : ''}">${window.NO_MEDIA ? s.svg.replace(/<image[^>]*>/g, '') : s.svg.split('{IMG}').join(SLIDE_IMG)}</div>`;
+    else {
+      if (s.fill) html += `<div style="${box}background:${s.fill}"></div>`;
+      if (s.img && !window.NO_MEDIA) html += `<img src="/media?p=${encodeURIComponent('@/cache/slides/' + s.img)}" alt="" style="${box}object-fit:fill">`;
+    }
     if (s.text) {
       const t = s.text, pad = s.pad || [0, 0, 0, 0];
       let paras = t.paras;
       // testo modificato: righe semplici (vecchie modifiche) o righe con corsivo/grassetto/colore
-      if (i === main) { const r0 = (t.paras[0] && t.paras[0].runs[0]) || { s: 0.08, f: '', c: '#fff' };
+      if (i === main) { const p0 = t.paras[0] || {}, r0 = (p0.runs && p0.runs[0]) || { s: 0.08, f: '', c: '#fff' };
         const lines = Array.isArray(override) ? override : override.split('\n').map((line) => [{ t: line }]);
-        paras = lines.map((runs) => ({ a: (t.paras[0] || {}).a || 'center', s: r0.s, runs: runs.map((r) => Object.assign({}, r0, r.i == null ? {} : { i: r.i, b: r.b }, { t: r.t, c: r.c || r0.c })) })); }
-      html += `<div class="sl-text" style="${box}display:flex;flex-direction:column;justify-content:${t.anchor};padding:${pad[1] * 100}cqh ${pad[2] * 100}cqw ${pad[3] * 100}cqh ${pad[0] * 100}cqw;box-sizing:border-box;${t.nowrap ? 'white-space:nowrap;' : ''}line-height:1.12">`
-        + paras.map((p) => `<div style="text-align:${p.a};font-size:${p.s * scale * 100}cqh;min-height:1em">${p.runs.map((r) => `<span style="font-size:${(r.s / (p.s || r.s || 1)) * 100}%;font-family:'${e(r.f)}','Helvetica Neue',Helvetica,sans-serif;${r.b ? 'font-weight:700;' : ''}${r.i ? 'font-style:italic;' : ''}${r.c ? 'color:' + r.c : ''}">${e(r.t)}</span>`).join('')}</div>`).join('')
-        + '</div>';
+        paras = lines.map((runs) => Object.assign({}, p0, { bu: null, a: p0.a || 'center', s: r0.s, runs: runs.map((r) => Object.assign({}, r0, r.i == null ? {} : { i: r.i, b: r.b }, { t: r.t, c: r.c || r0.c })) })); }
+      const para = (p) => {
+        const st = `text-align:${p.a};font-size:calc(${p.s * scale * 100}cqh * var(--af, 1));min-height:1em;flex-shrink:0;`
+          + (p.lha ? `line-height:calc(${p.lha * scale * 100}cqh * var(--af, 1));` : p.lh ? `line-height:${p.lh};` : '')
+          + (p.sb ? `margin-top:${p.sb * scale * 100}cqh;` : '') + (p.sa ? `margin-bottom:${p.sa * scale * 100}cqh;` : '')
+          + (p.ml || p.ind ? `padding-left:${p.ml * 100}cqw;text-indent:${p.ind * 100}cqw;` : '');
+        const bu = p.bu ? `<span style="display:inline-block;text-indent:0;${p.ind < 0 ? `min-width:${-p.ind * 100}cqw;` : 'margin-right:.4em;'}color:${p.bu.c};font-size:${p.bu.s * 100}%">${e(p.bu.t)}</span>` : '';
+        return `<div style="${st}">${bu}${p.runs.map((r) => `<span style="font-size:${(r.s / (p.s || r.s || 1)) * 100}%;font-family:'${e(r.f)}','Helvetica Neue',Helvetica,sans-serif;${r.b ? 'font-weight:700;' : ''}${r.i ? 'font-style:italic;' : ''}${r.cap ? 'text-transform:uppercase;' : ''}${r.u ? 'text-decoration:underline;' : ''}${r.bl ? `vertical-align:${r.bl * 100}%;font-size:${(r.s / (p.s || r.s || 1)) * 66}%;` : ''}${r.c ? 'color:' + r.c : ''}">${e(r.t)}</span>`).join('')}</div>`;
+      };
+      html += `<div class="sl-text${t.fit ? ' af' : ''}" style="${box}display:flex;flex-direction:column;justify-content:${t.anchor};padding:${pad[1] * 100}cqh ${pad[2] * 100}cqw ${pad[3] * 100}cqh ${pad[0] * 100}cqw;box-sizing:border-box;white-space:${t.nowrap ? 'pre' : 'pre-wrap'};overflow-wrap:break-word">`
+        + paras.map(para).join('') + '</div>';
     }
     return html;
   }).join('');
 };
+
+/* riquadri con «adatta il testo alla forma»: se il testo esce, si rimpicciolisce
+   finché ci sta (come fa PowerPoint). Vale ovunque si disegnino diapositive. */
+window.fitSlideText = (all) => document.querySelectorAll(all ? '.sl-text.af' : '.sl-text.af:not([data-fit])').forEach((el) => {
+  if (!el.clientHeight) return;                    // non ancora visibile: si riprova dopo
+  el.dataset.fit = 1; el.style.removeProperty('--af');
+  if (el.scrollHeight <= el.clientHeight + 1) return;
+  let lo = 0.25, hi = 1;
+  for (let k = 0; k < 7; k++) { const mid = (lo + hi) / 2; el.style.setProperty('--af', mid); if (el.scrollHeight <= el.clientHeight + 1) lo = mid; else hi = mid; }
+  el.style.setProperty('--af', lo);
+});
+if (window.MutationObserver) {
+  let queued = false;
+  new MutationObserver(() => { if (queued) return; queued = true; requestAnimationFrame(() => { queued = false; window.fitSlideText(); }); })
+    .observe(document.documentElement, { childList: true, subtree: true });
+  window.addEventListener('resize', () => window.fitSlideText(true));
+  if (document.fonts) document.fonts.addEventListener('loadingdone', () => window.fitSlideText(true));
+}

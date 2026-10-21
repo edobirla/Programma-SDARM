@@ -182,6 +182,31 @@ function buildIdle() {
   return { bg: prof.template ? `url("${media(prof.template)}") center/cover no-repeat, #000` : '#000', html: vid + txt };
 }
 
+/* transizioni delle diapositive come in PowerPoint (dir = verso del movimento) */
+function slideTrans(t, prev, c) {
+  const D = Math.max(1, t.d || 500), V = { l: [-1, 0], r: [1, 0], u: [0, -1], d: [0, 1], lu: [-1, -1], ru: [1, -1], ld: [-1, 1], rd: [1, 1] }[t.dir || 'l'] || [-1, 0];
+  const mv = (k) => `translate(${V[0] * k}%, ${V[1] * k}%)`;
+  const inNew = (kf, o) => c.animate(kf, Object.assign({ duration: D, easing: 'ease-in-out', fill: 'backwards' }, o));
+  const outOld = (kf, o) => prev && prev.animate(kf, Object.assign({ duration: D, easing: 'ease-in-out', fill: 'forwards' }, o));
+  const wipe = { l: 'inset(0 0 0 100%)', r: 'inset(0 100% 0 0)', u: 'inset(100% 0 0 0)', d: 'inset(0 0 100% 0)' }[t.dir || 'l'] || 'inset(0 0 0 100%)';
+  switch (t.t) {
+    case 'cut': break;
+    case 'push': outOld([{ transform: 'none' }, { transform: mv(100) }]); inNew([{ transform: mv(-100) }, { transform: 'none' }]); break;
+    case 'cover': inNew([{ transform: mv(-100) }, { transform: 'none' }]); break;
+    case 'pull': outOld([{ transform: 'none' }, { transform: mv(100) }]); break;
+    case 'wipe': inNew([{ clipPath: wipe }, { clipPath: 'inset(0 0 0 0)' }]); break;
+    case 'split': { const mid = t.orient === 'horz' ? 'inset(50% 0 50% 0)' : 'inset(0 50% 0 50%)';
+      if (t.dir === 'in') { inNew([{ opacity: 1 }, { opacity: 1 }]); outOld([{ clipPath: 'inset(0 0 0 0)' }, { clipPath: mid }]); }
+      else inNew([{ clipPath: mid }, { clipPath: 'inset(0 0 0 0)' }]); break; }
+    case 'circle': inNew([{ clipPath: 'circle(0% at 50% 50%)' }, { clipPath: 'circle(75% at 50% 50%)' }]); break;
+    case 'zoom': inNew(t.dir === 'in' ? [{ transform: 'scale(1.6)', opacity: 0 }, { transform: 'none', opacity: 1 }] : [{ transform: 'scale(.3)', opacity: 0 }, { transform: 'none', opacity: 1 }]); break;
+    case 'fade': if (t.blk) { outOld([{ opacity: 1 }, { opacity: 0 }], { duration: D / 2 }); inNew([{ opacity: 0 }, { opacity: 1 }], { duration: D / 2, delay: D / 2 }); break; }
+    // falls through
+    default: inNew([{ opacity: 0 }, { opacity: 1 }]);          // dissolvenza e transizioni speciali
+  }
+  if (prev) setTimeout(() => prev.remove(), t.t === 'cut' ? 0 : D + 60);
+}
+
 /* ── mostrare uno stato ────────────────────────────────────────────────── */
 function show(s) {
   cur = s;
@@ -192,11 +217,15 @@ function show(s) {
   if (ov === 'congela') return;                       // la sala resta ferma
   const key = JSON.stringify(Object.assign({}, s, { hl: null, zoom: null, overlay: null, from: null, playing: null, pos: null, at: null, vrate: null, iz: null, icx: null, icy: null, ptr: null }));
   if (key !== shownKey) {
-    // dissolvenza: quello di prima sfuma mentre il nuovo compare (niente tagli netti)
+    // PowerPoint: la transizione scelta nel file; il resto sfuma (niente tagli netti)
+    const tr = !PREVIEW && s.style === 'pptx' && slidesCache[s.file] ? (slidesCache[s.file].trans || [])[s.i] : null;
+    let prev = null;
     if (shownKey && !PREVIEW) {
-      const prev = document.createElement('div'); prev.className = 'layer fadeout'; prev.style.background = $('#bg').style.background;
+      prev = document.createElement('div'); prev.className = 'layer' + (tr ? '' : ' fadeout'); prev.style.background = $('#bg').style.background;
       if (!$('#content video')) prev.innerHTML = $('#content').innerHTML;
-      $('#stage').insertBefore(prev, $('#zoom')); setTimeout(() => prev.remove(), 600);
+      // la nuova entra sopra la vecchia, tranne quando è la vecchia a scivolare via
+      $('#stage').insertBefore(prev, tr && tr.t !== 'pull' ? $('#content') : $('#zoom'));
+      if (!tr) { const p = prev; setTimeout(() => p.remove(), 600); }
     }
     shownKey = key;
     clearInterval(timerT);
@@ -205,7 +234,8 @@ function show(s) {
     else {
       const out = build(s);
       $('#bg').style.background = out.bg;
-      const c = $('#content'); c.innerHTML = out.html; c.classList.remove('fadein'); void c.offsetWidth; c.classList.add('fadein');
+      const c = $('#content'); c.innerHTML = out.html; c.classList.remove('fadein'); void c.offsetWidth;
+      if (tr) slideTrans(tr, prev, c); else c.classList.add('fadein');
       document.querySelectorAll('#content .fit').forEach((el) => fit(el, +el.dataset.max));
       if (out.timer) { const upd = () => { const r = s.paused != null ? s.paused : Math.max(0, Math.round((s.endAt - Date.now()) / 1000)); const el = $('#tval'); if (el) el.textContent = Math.floor(r / 60).toString().padStart(2, '0') + ':' + String(r % 60).padStart(2, '0'); }; upd(); if (s.paused == null) timerT = setInterval(upd, 250); }
     }
