@@ -1,0 +1,8 @@
+{
+  "database": { "rules": "database.rules.json" },
+  "hosting": {
+    "public": "public",
+    "rewrites": [{ "source": "/output", "destination": "/output.html" }, { "source": "**", "destination": "/index.html" }],
+    "headers": [{ "source": "**", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] }]
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "rooms": {
+      "$room": {
+        ".read": "auth != null && $room.length === 32",
+        ".write": "auth != null && $room.length === 32"
+      }
+    },
+    "pair": {
+      "$code": {
+        ".read": "auth != null && $code.length === 8",
+        ".write": "auth != null && $code.length === 8 && (!data.exists() || data.val() === newData.val())",
+        ".validate": "newData.isString() && newData.val().length === 32"
+      }
+    }
+  }
+}

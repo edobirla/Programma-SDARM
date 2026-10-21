@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Uscita — SDARM</title>
+<style>
+  html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }   /* sul telefono il testo dell'anteprima non va ingrandito */
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; cursor: none; }
+  body.preview { cursor: default; }
+  #stage { position: absolute; inset: 0; color: #fff; font-family: Helvetica, Arial, sans-serif; container-type: size; }
+  .layer { position: absolute; inset: 0; }
+  #content { transition: opacity .45s cubic-bezier(.2,.8,.2,1), transform .5s cubic-bezier(.2,.8,.2,1); will-change: transform, opacity; }
+  #content { transition: opacity .45s cubic-bezier(.2,.8,.2,1), transform .5s cubic-bezier(.2,.8,.2,1), filter .45s ease; }
+  #content.dim { opacity: .22; transform: scale(.94); filter: blur(14px); }
+  .box { position: absolute; display: flex; flex-direction: column; justify-content: center; overflow: hidden; line-height: 1.25; }
+  .box.center { text-align: center; align-items: center; }
+  .w, .sp { transition: background .25s ease; }
+  .w.hl, .sp.hl { background: rgba(255,207,92,.45); }
+  .w.hl-s { border-radius: .12em 0 0 .12em; } .w.hl-e { border-radius: 0 .12em .12em 0; } .w.hl-s.hl-e { border-radius: .12em; }
+  #zoom { display: flex; align-items: center; justify-content: center; pointer-events: none; opacity: 0; }
+  #zoom.on { opacity: 1; }
+  #zoomText { position: absolute; left: 9%; right: 9%; top: 18%; bottom: 18%; display: flex; align-items: center; justify-content: center; text-align: center;
+    font-weight: 600; line-height: 1.22; }
+  #zoomText span { padding: 0 .12em; }
+  #nero { background: #000; opacity: 0; transition: opacity .4s ease; }
+  #sfondo { opacity: 0; transition: opacity .45s ease; background: radial-gradient(circle at 50% 45%, #1f4fa3, #081633 70%) center/cover no-repeat; display: flex; align-items: center; justify-content: center; }
+  #sfondo .logo { width: 22vh; height: 18vh; background: #fff; -webkit-mask: url(/assets/logo-bianco.png) center/contain no-repeat; mask: url(/assets/logo-bianco.png) center/contain no-repeat; }
+  .on { opacity: 1 !important; }
+  #hint { position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%); padding: 10px 18px; border-radius: 20px; background: rgba(255,255,255,.12);
+    color: rgba(255,255,255,.8); font: 600 15px -apple-system, system-ui, sans-serif; transition: opacity .6s ease; }
+  .zimg { transition: transform .08s linear, transform-origin .08s linear; will-change: transform; }
+  #ptr { position: absolute; width: 5.5cqh; height: 5.5cqh; margin: -2.75cqh 0 0 -2.75cqh; border-radius: 50%; pointer-events: none; opacity: 0; transition: opacity .2s;
+    transition: opacity .2s, left .05s linear, top .05s linear;
+    background: radial-gradient(circle, rgba(255,230,120,.95) 0 18%, rgba(255,200,60,.55) 32%, rgba(255,190,40,0) 70%); box-shadow: 0 0 4cqh 1.5cqh rgba(255,200,60,.35); }
+  #ptr.on { opacity: 1; }
+  @keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes fadeout { from { opacity: 1; } to { opacity: 0; } }
+  .fadeout { animation: fadeout .5s ease forwards; pointer-events: none; }
+  .fadein { animation: fadein .5s ease backwards; }
+</style>
+<link rel="stylesheet" href="/fonts.css">
+<style>body:not(.preview) { cursor: none; }</style>
+</head>
+<body>
+<div id="stage">
+  <div id="bg" class="layer"></div>
+  <div id="content" class="layer"></div>
+  <div id="zoom" class="layer"><div id="zoomText"></div></div>
+  <div id="ptr"></div>
+  <div id="sfondo" class="layer"><div class="logo"></div></div>
+  <div id="nero" class="layer"></div>
+</div>
+<div id="hint">Clic per lo schermo intero · Esc toglie la proiezione</div>
+<script src="/static/cloud.js"></script>
+<script src="/static/shared.js"></script>
+<script src="/static/output.js"></script>
+</body>
+</html>
