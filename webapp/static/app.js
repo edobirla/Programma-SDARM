@@ -924,7 +924,10 @@ function viewSettings() {
         <div style="color:var(--sub);font-size:12px">La 1 era l'app per computer; questa è la 2, il redesign. Le versioni successive arrivano da qui con un clic.</div>
         ${S.upd && S.upd.newer ? `<div class="soft" style="display:flex;flex-direction:column;gap:8px;margin-top:6px"><b style="font-size:15px">Disponibile la versione ${esc(S.upd.latest)}</b>
           ${S.upd.notes ? `<div style="color:var(--sub);white-space:pre-line;font-size:13px">${esc(S.upd.notes)}</div>` : ''}
-          <button class="btn pri" data-a="doUpdate" style="align-self:flex-start">Aggiorna ora</button></div>` : `<div style="color:var(--faint);font-size:12px">${S.upd ? 'Hai l\'ultima versione.' : ''}</div>`}`)
+          ${S.updRun ? `<div style="display:flex;flex-direction:column;gap:6px;max-width:460px"><div style="height:8px;border-radius:4px;background:var(--line);overflow:hidden">
+            <div id="updBar" style="height:100%;width:${Math.round((S.updRun.pct || 0) * 100)}%;background:var(--accent);border-radius:4px;transition:width .3s ease"></div></div>
+            <span id="updTxt" style="font-size:12.5px;color:var(--sub)">${esc(updLabel(S.updRun))}</span></div>`
+          : '<button class="btn pri" data-a="doUpdate" style="align-self:flex-start">Aggiorna ora</button>'}</div>` : `<div style="color:var(--faint);font-size:12px">${S.upd ? 'Hai l\'ultima versione.' : ''}</div>`}`)
       + card(`<span class="label">Dati dell'app</span><div style="font-size:12.5px;color:var(--sub)">${esc(S.data || '')}</div>
         <div style="display:flex;gap:8px;margin-top:4px"><button class="btn" data-a="backupExport">Esporta backup…</button><button class="btn" data-a="backupImport">Ripristina da backup…</button><button class="btn" data-a="migrateOld">Importa dall'app precedente…</button></div>`);
       break;
@@ -1279,6 +1282,8 @@ function timerTick() {
 // il timer in sala segue il pannello: in pausa resta fermo, i ± si vedono subito
 function timerLive() { if (REMOTE || S.live.kind !== 'timer') return; const T = S.timer;
   S.live = Object.assign({}, S.live, T.running ? { endAt: T.endAt, paused: null } : { paused: T.remaining }); pushLive(); }
+const updLabel = (u) => (u.phase === 'extract' ? 'Preparo la nuova versione…' : u.phase === 'restart' ? 'Fatto: l\'app si chiude e si riapre aggiornata…'
+  : 'Scarico l\'aggiornamento… ' + Math.round((u.pct || 0) * 100) + '%');
 function playFx(p) { const a = $('#fxAudio'); a.src = amedia(p); a.play().catch(() => {}); }
 function setupBell() {
   const b = $('#bell'); let t = 0;
@@ -1875,8 +1880,20 @@ const act = {
   pickTemplate: async () => { const ps = await pickInto('file', 'modelli', 'Scegli l\'immagine del modello', 'image'); if (!ps.length) return; saveProfile(S.gtab || 'domanda', { template: ps[0] }); renderMain(); },
   removeTemplate: () => { saveProfile(S.gtab || 'domanda', { template: '' }); renderMain(); },
   goUpdate: () => { S.view = 'impostazioni'; S.cat = 'versione'; closePops(); renderMain(); },
-  doUpdate: async () => { toast('Scarico l\'aggiornamento… l\'app si chiude e si riapre da sola');
-    const r = await api.post('/api/update/install', {}); if (!r.ok) return toast(r.error || 'Aggiornamento non riuscito'); },
+  doUpdate: async () => {
+    const r = await api.post('/api/update/install', {}); if (!r.ok) return toast(r.error || 'Aggiornamento non riuscito');
+    S.updRun = { phase: 'download', pct: 0 }; renderMain();
+    // la barra segue il download; alla fine l'app si chiude e si riapre aggiornata
+    const tick = async () => {
+      let u; try { u = await api.get('/api/update/status'); } catch (e) { return; }   // il motore si è già chiuso per riavviarsi
+      S.updRun = u;
+      if (u.phase === 'error') { S.updRun = null; toast('Aggiornamento non riuscito: ' + (u.error || '')); renderMain(); return; }
+      const bar = $('#updBar'), txt = $('#updTxt');
+      if (bar) bar.style.width = Math.round((u.pct || 0) * 100) + '%';
+      if (txt) txt.textContent = updLabel(u);
+      setTimeout(tick, 400);
+    };
+    tick(); },
   newRoom: async () => { await setSetting('phone_room', ''); await setSetting('phone_code', ''); location.reload(); },
   addFont: async () => { const ps = await pickInto('file', 'fonts', 'Scegli i file dei caratteri (.ttf, .otf)', 'font', true); if (!ps.length) return;
     document.querySelectorAll('link[href^="/fonts.css"]').forEach((l) => { l.href = '/fonts.css?' + Date.now(); });

@@ -47,7 +47,7 @@ from pptx import Presentation              # noqa: E402
 STATIC = os.path.join(ROOT, "webapp", "static")
 ASSETS = os.path.join(ROOT, "assets")
 PORT = int(os.environ.get("SDARM_PORT") or os.environ.get("PORT") or "8765")
-VERSION = "2.0.1"
+VERSION = "2.0.2"
 # identifica questa copia dell'app: l'avvio spegne i motori di versioni precedenti
 BUILD = str(int(os.path.getmtime(sys.executable if FROZEN else os.path.abspath(__file__))))
 AUDIO_EXT = (".mp3", ".m4a", ".wav", ".ogg", ".aac", ".flac")
@@ -290,28 +290,89 @@ def check_update():
     return out
 
 
+UPD = {"phase": "", "pct": 0.0, "error": ""}     # avanzamento dell'aggiornamento, per la barra nel pannello
+APPS = "/Applications/Programma SDARM.app"
+
+
+def _original_app(app):
+    """Dove sta davvero l'app. Aperta da Download (o da uno zip) macOS la fa
+    girare da una copia temporanea in sola lettura («AppTranslocation»):
+    sostituire quella non serve a niente, va cercata quella vera."""
+    if "/AppTranslocation/" not in app:
+        return app
+    try:
+        import ctypes
+        cf = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+        sec = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/Security.framework/Security")
+        cf.CFURLCreateFromFileSystemRepresentation.restype = ctypes.c_void_p
+        cf.CFURLCreateFromFileSystemRepresentation.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_long, ctypes.c_bool]
+        cf.CFURLGetFileSystemRepresentation.argtypes = [ctypes.c_void_p, ctypes.c_bool, ctypes.c_char_p, ctypes.c_long]
+        sec.SecTranslocateCreateOriginalPathForURL.restype = ctypes.c_void_p
+        sec.SecTranslocateCreateOriginalPathForURL.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        raw = app.encode()
+        url = cf.CFURLCreateFromFileSystemRepresentation(None, raw, len(raw), True)
+        orig = sec.SecTranslocateCreateOriginalPathForURL(url, None)
+        buf = ctypes.create_string_buffer(4096)
+        if orig and cf.CFURLGetFileSystemRepresentation(orig, True, buf, 4096):
+            return buf.value.decode()
+    except Exception:
+        pass
+    return None
+
+
 def install_update(asset):
-    """Scarica la nuova app, poi uno script sostituisce questa e la riapre
-    (l'app si chiude un attimo; i dati restano dove sono)."""
-    import tempfile
+    """Scarica la nuova app in sottofondo (la barra nel pannello segue UPD),
+    poi uno script la mette in Applicazioni e la riapre; una vecchia copia
+    fuori da Applicazioni (es. in Download) va nel Cestino. I dati restano dove sono."""
     app = os.path.abspath(os.path.join(sys.executable, "..", "..", ".."))
     if not FROZEN or not app.endswith(".app"):
         raise RuntimeError("Questa è la versione di sviluppo: aggiorna con  git pull")
-    tmp = tempfile.mkdtemp()
-    zpath = os.path.join(tmp, "update.zip")
-    with _get(asset, timeout=300) as r, open(zpath, "wb") as f:
-        shutil.copyfileobj(r, f)
-    subprocess.run(["ditto", "-x", "-k", zpath, tmp], check=True)
-    new = next(os.path.join(tmp, x) for x in os.listdir(tmp) if x.endswith(".app"))
-    script = os.path.join(tmp, "update.sh")
-    with open(script, "w") as f:
-        f.write(f"""#!/bin/bash
+    if UPD["phase"] in ("download", "extract", "restart"):
+        return
+    UPD.update(phase="download", pct=0.0, error="")
+    threading.Thread(target=_install, args=(asset, app), daemon=True).start()
+
+
+def _install(asset, app):
+    import tempfile
+    try:
+        tmp = tempfile.mkdtemp()
+        zpath = os.path.join(tmp, "update.zip")
+        with _get(asset, timeout=300) as r, open(zpath, "wb") as f:
+            total, done = int(r.headers.get("Content-Length") or 0), 0
+            while True:
+                chunk = r.read(1 << 16)
+                if not chunk:
+                    break
+                f.write(chunk)
+                done += len(chunk)
+                if total:
+                    UPD["pct"] = done / total
+        UPD.update(phase="extract", pct=1.0)
+        subprocess.run(["ditto", "-x", "-k", zpath, tmp], check=True)
+        new = next(os.path.join(tmp, x) for x in os.listdir(tmp) if x.endswith(".app"))
+        subprocess.run(["xattr", "-dr", "com.apple.quarantine", new], check=False)
+        orig = _original_app(app)
+        in_apps = orig and (orig.startswith("/Applications/") or orig.startswith(os.path.expanduser("~/Applications/")))
+        target = orig if in_apps else APPS
+        if not in_apps and not os.access("/Applications", os.W_OK):
+            target = orig or APPS                      # niente permessi su Applicazioni: si resta dov'è
+        old_copy = orig if orig and orig != target else ""
+        script = os.path.join(tmp, "update.sh")
+        with open(script, "w") as f:
+            f.write(f"""#!/bin/bash
+exec >>"{tmp}/update.log" 2>&1
 while kill -0 {os.getpid()} 2>/dev/null; do sleep 0.3; done
-rm -rf "{app}" && mv "{new}" "{app}" && xattr -dr com.apple.quarantine "{app}" 2>/dev/null
-open "{app}"
+if [ -e "{target}" ]; then mv "{target}" "{tmp}/precedente.app" || {{ open "{target}"; exit 1; }}; fi
+if ! mv "{new}" "{target}"; then mv "{tmp}/precedente.app" "{target}"; open "{target}"; exit 1; fi
+if [ -n "{old_copy}" ] && [ -e "{old_copy}" ]; then mv "{old_copy}" "$HOME/.Trash/Programma SDARM vecchia $(date +%H%M%S).app"; fi
+open "{target}"
 """)
-    subprocess.Popen(["/bin/bash", script], start_new_session=True)
-    threading.Timer(1.0, lambda: os._exit(0)).start()
+        UPD.update(phase="restart")
+        subprocess.Popen(["/bin/bash", script], start_new_session=True)
+        threading.Timer(1.5, lambda: os._exit(0)).start()
+    except Exception as ex:
+        UPD.update(phase="error", error=str(ex)[:200])
 
 
 # ── backup, ripristino, vecchia app ─────────────────────────────────────────
@@ -719,6 +780,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"loaded": fonts_loaded(), "used": fonts_used()})
         if p == "/api/update":
             return self._json(check_update())
+        if p == "/api/update/status":
+            return self._json(UPD)
         if p == "/api/phone/qr":
             import io
             import qrcode
