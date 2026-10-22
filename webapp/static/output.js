@@ -51,7 +51,7 @@ const linesWords = (t) => { let n = 0; return String(t || '').split('\n').map((l
 // parole e spazi separati: l'evidenziazione copre anche gli spazi, come un'unica striscia
 const words = (t) => String(t || '').split(/\s+/).filter(Boolean).map((w, i) => (i ? `<span class="sp" data-s="${i - 1}"> </span>` : '') + `<span class="w" data-w="${i}">${esc(w)}</span>`).join('');
 // riferimenti della domanda: sotto il testo, più piccoli e di un altro colore
-const refLine = (ref, color) => (ref ? `<div style="font-size:.68em;margin-top:.4em;font-weight:700;color:${color}">${esc(ref)}</div>` : '');
+const refLine = (ref, color) => (ref ? `<div style="font-size:.68em;margin-top:.4em;font-weight:700;text-align:center;white-space:nowrap;color:${color}">${esc(ref)}</div>` : '');
 const boxStyle = (b) => `left:${b[0] * 100}%;top:${b[1] * 100}%;width:${b[2] * 100}%;height:${b[3] * 100}%`;
 
 function profile(name) { return ((ST.lesson_graphic_profiles || {})[name]) || {}; }
@@ -129,7 +129,7 @@ function buildTemplate(s, prof) {
   const B = boxesOf(prof, s.profile), C = prof.colors || {}, M = prof.max_sizes || {};
   const font = prof.font_family || ST.lesson_font_family || ST.verse_font_family || 'Helvetica';
   const head = C.header || ST.lesson_header_color || '#5aae5f';
-  const cell = (key, inner, opts = {}) => B[key] ? `<div class="box ${opts.center ? 'center' : ''} ${opts.fit ? 'fit' : ''}" data-max="${M[key] || opts.max || 200}" style="${boxStyle(B[key])};color:${opts.color};font-family:${font};font-weight:${opts.w || 600}">${inner}</div>` : '';
+  const cell = (key, inner, opts = {}) => B[key] ? `<div class="box ${opts.center ? 'center' : ''} ${opts.fit ? 'fit' : ''}" data-max="${M[key] || opts.max || 200}" style="${boxStyle(opts.box || B[key])};color:${opts.color};font-family:${font};font-weight:${opts.w || 600}${opts.nowrap ? ';white-space:nowrap' : ''}">${inner}</div>` : '';
   let inner = cell('header', `<div>${esc(s.top || '')}</div>`, { fit: true, color: head, w: 800, max: 70 }) + cell('date', `<div>${esc(s.date || '')}</div>`, { fit: true, color: C.date || ST.lesson_date_color || head, w: 700, max: 60 });
   if (B.photo && s.photo) inner += `<div class="box" style="${boxStyle(B.photo)};background:url('${media(s.photo)}') center/cover"></div>`;
   if (s.kind === 'intro') {
@@ -140,7 +140,10 @@ function buildTemplate(s, prof) {
   } else if (s.part === 'domanda' && B.question) {
     inner += cell('question', `<div><span style="color:${ST.lesson_letter_color || head};font-weight:700">${esc(s.marker || '')}</span> ${words(s.main)}</div>`, { fit: true, color: C.question || ST.lesson_question_color || '#fff', max: 160 });
     // riferimenti in un riquadro loro: si spostano e ridimensionano in Impostazioni › Grafiche
-    if (s.ref) inner += cell('riferimento', `<div>${esc(s.ref)}</div>`, { fit: true, color: C.riferimento || '#5b3a1f', w: 700, max: 60 });
+    // riferimenti: centrati, tutti sulla stessa riga; la grandezza segue il riquadro (e il cursore in Grafiche)
+    // la riga può allargarsi ai lati restando centrata sul riquadro: conta la sua altezza
+    const rb = B.riferimento, rc = rb && rb[0] + rb[2] / 2, rw = rb && Math.max(rb[2], 2 * Math.min(rc, 1 - rc) - 0.04);
+    if (s.ref) inner += cell('riferimento', `<div>${esc(s.ref)}</div>`, { fit: true, center: true, nowrap: true, color: C.riferimento || '#5b3a1f', w: 700, max: 400, box: rb && [rc - rw / 2, rb[1], rw, rb[3]] });
   } else {
     const extra = (s.extra || []).map((t) => `<div style="font-size:.8em;opacity:.85;font-style:italic;margin-top:.6em">${esc(t)}</div>`).join('');
     inner += cell('testo', `<div>${words(s.main)}${extra}</div>`, { fit: true, center: true, color: C.testo || '#fff', max: 160 });
