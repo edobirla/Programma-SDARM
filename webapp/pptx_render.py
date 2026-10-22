@@ -967,8 +967,8 @@ def keynote_slides(path, cache_root, base, cached_only=False):
         # percorsi scritti nel comando (così macOS dà a Keynote il permesso di usarli);
         # «skipped slides» fa chiudere Keynote: non si usa
         aq = lambda p: '"' + p.replace("\\", "\\\\").replace('"', '\\"') + '"'
-        if not running:                                      # Keynote acceso prima, in sottofondo: appena avviato non risponde bene
-            subprocess.run(["open", "-g", "-a", "Keynote"])
+        if not running:      # Keynote acceso prima, nascosto (-j: nessuna finestra a schermo); appena avviato non risponde bene
+            subprocess.run(["open", "-g", "-j", "-a", "Keynote"])
             for _ in range(40):
                 if subprocess.run(["osascript", "-e", 'tell application "Keynote" to get version'], capture_output=True).returncode == 0:
                     break
