@@ -71,8 +71,8 @@ function build(s) {
   // modello mancante (file spostato o cancellato): si usa la grafica semplice
   if (prof.template && imgDims[media(prof.template)] !== 'missing' && ['lesson', 'verse', 'intro'].includes(s.kind)) return buildTemplate(s, prof);
   if (s.style === 'pptx') {
-    const data = slidesCache[s.file];
-    if (data === undefined) { xf('/api/slides?p=' + encodeURIComponent(s.file)).then((r) => (r.ok ? r.json() : null)).then((d) => { slidesCache[s.file] = d; shownKey = ''; show(cur); }); return { bg: '#000', html: '' }; }
+    const u = s.src || '/api/slides?p=' + encodeURIComponent(s.file), data = slidesCache[u];
+    if (data === undefined) { xf(u).then((r) => (r.ok ? r.json() : null)).then((d) => { slidesCache[u] = d; shownKey = ''; show(cur); }); return { bg: '#000', html: '' }; }
     if (data && data.slides[s.i]) return { bg: '#000', html: `<div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);aspect-ratio:${data.ratio};width:min(100%,calc(100cqh*${data.ratio}));container-type:size;overflow:hidden">${slideHTML(data.slides[s.i], s.i, s.edit)}</div>` };
     s = Object.assign({}, s, { style: 'hymn' });          // PowerPoint illeggibile: solo testo
   }
@@ -221,7 +221,8 @@ function show(s) {
   const key = JSON.stringify(Object.assign({}, s, { hl: null, zoom: null, overlay: null, from: null, playing: null, pos: null, at: null, vrate: null, iz: null, icx: null, icy: null, ptr: null, draw: null, b: null, sub: null }));
   if (key !== shownKey) {
     // PowerPoint: la transizione scelta nel file; il resto sfuma (niente tagli netti)
-    const tr = !PREVIEW && s.style === 'pptx' && slidesCache[s.file] ? (slidesCache[s.file].trans || [])[s.i] : null;
+    const sd = s.style === 'pptx' && slidesCache[s.src || '/api/slides?p=' + encodeURIComponent(s.file)];
+    const tr = !PREVIEW && sd ? (sd.trans || [])[s.i] : null;
     let prev = null;
     if (shownKey && !PREVIEW) {
       prev = document.createElement('div'); prev.className = 'layer' + (tr ? '' : ' fadeout'); prev.style.background = $('#bg').style.background;
@@ -252,8 +253,9 @@ function show(s) {
 /* ── animazioni dei PowerPoint: un passo per ogni «Avanti» ─────────────── */
 let built = { key: '', b: -1 };
 function applyBuild(s) {
-  const d = s.style === 'pptx' && slidesCache[s.file], A = d && d.anim && d.anim[s.i];
+  const d = s.style === 'pptx' && slidesCache[s.src || '/api/slides?p=' + encodeURIComponent(s.file)], A = d && d.anim && d.anim[s.i];
   const key = shownKey + '|' + s.file + '|' + s.i;
+  if (d && d.native) return nativeStage(d, s, key);
   if (!A) { built = { key, b: -1 }; return; }
   const b = s.b || 0, done = (A.a ? 1 : 0) + b, fresh = built.key !== key;
   // si anima solo il passo appena chiesto (o quello che parte da solo all'arrivo); il resto si imposta subito
@@ -262,6 +264,16 @@ function applyBuild(s) {
   built = { key, b };
   buildState(A.st, play >= 0 ? play : Math.min(done, A.st.length));
   if (play >= 0 && A.st[play]) A.st[play].forEach(runEffect);
+}
+// diapositive di Keynote: un'immagine per passo; si passa dall'una all'altra in dissolvenza
+function nativeStage(d, s, key) {
+  const n = d.slides[s.i].length, auto = d.auto && d.auto[s.i] ? 1 : 0, b = s.b || 0, fresh = built.key !== key;
+  if (!fresh && b === built.b) return;
+  const els = [...document.querySelectorAll('#content [data-stg]')];
+  const show = (k, fade) => els.forEach((el) => { el.style.transition = fade ? 'opacity .5s ease' : 'none'; el.style.opacity = +el.dataset.stg === Math.min(k, n - 1) ? 1 : 0; });
+  if (fresh && auto && b === 0) { show(0, false); setTimeout(() => { if (built.key === key) show(1, true); }, 400); }
+  else show(auto + b, !fresh);
+  built = { key, b };
 }
 const animEls = (e) => { const w = [...document.querySelectorAll(`#content [data-sp~="${e.s}"]`)];
   return e.p ? w.flatMap((x) => [...x.querySelectorAll('[data-pi]')].filter((p) => +p.dataset.pi >= e.p[0] && +p.dataset.pi <= e.p[1])) : w; };
@@ -387,6 +399,7 @@ window.addEventListener('resize', () => { shownKey = ''; show(cur); });
     const m = JSON.parse(e.data);
     if (m.view) { Object.assign(cur, m.view); syncImage(cur); return; }   // puntatore e zoom: veloce, senza ridisegnare
     if ('state' in m) show(m.state || { kind: 'none' });
+    if (m.sync === 'slides') { Object.keys(slidesCache).forEach((u) => { if (slidesCache[u] && slidesCache[u].pending) delete slidesCache[u]; }); shownKey = ''; show(cur); }
     if (m.sync === 'fonts') { document.querySelectorAll('link[href^="/fonts.css"]').forEach((l) => { l.href = '/fonts.css?' + Date.now(); }); setTimeout(() => { shownKey = ''; show(cur); }, 500); }
     if (m.sync === 'settings') { const before = looks(ST); ST = (await (await xf('/api/bootstrap')).json()).settings || {};
       if (looks(ST) !== before) { shownKey = ''; show(cur); } }   // es. cambiare la lingua nel pannello non ridisegna la sala

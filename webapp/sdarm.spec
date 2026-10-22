@@ -33,4 +33,6 @@ coll = COLLECT(exe, a.binaries, a.datas, name="Programma SDARM")
 app = BUNDLE(coll, name="Programma SDARM.app", icon=os.path.join(ROOT, "assets", "app_icon.icns"),
              bundle_identifier="it.sdarm.programma",
              info_plist={"CFBundleShortVersionString": VERSION, "CFBundleVersion": VERSION, "NSHighResolutionCapable": True,
-                         "LSMinimumSystemVersion": "12.0"})
+                         "LSMinimumSystemVersion": "12.0",
+                         # Keynote disegna le presentazioni identiche: macOS chiede il permesso la prima volta
+                         "NSAppleEventsUsageDescription": "Serve per far disegnare a Keynote le diapositive dei PowerPoint esattamente come sono."})

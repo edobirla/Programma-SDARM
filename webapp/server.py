@@ -47,7 +47,7 @@ from pptx import Presentation              # noqa: E402
 STATIC = os.path.join(ROOT, "webapp", "static")
 ASSETS = os.path.join(ROOT, "assets")
 PORT = int(os.environ.get("SDARM_PORT") or os.environ.get("PORT") or "8765")
-VERSION = "2.0.8"
+VERSION = "2.0.9"
 # identifica questa copia dell'app: l'avvio spegne i motori di versioni precedenti
 BUILD = str(int(os.path.getmtime(sys.executable if FROZEN else os.path.abspath(__file__))))
 AUDIO_EXT = (".mp3", ".m4a", ".wav", ".ogg", ".aac", ".flac")
@@ -318,6 +318,31 @@ def _original_app(app):
     except Exception:
         pass
     return None
+
+
+NATIVE = {}      # presentazioni che Keynote sta disegnando: percorso -> "in corso" | errore
+
+
+def native_slides(path, base):
+    """Diapositive identiche (disegnate da Keynote) se pronte; altrimenti le
+    prepara in sottofondo e intanto risponde con il disegno dell'app."""
+    d = pptx_render.keynote_slides(path, SLIDES, base, cached_only=True)
+    if d:
+        return d
+    st = NATIVE.get(path)
+    if st is None:
+        NATIVE[path] = "in corso"
+
+        def job():
+            try:
+                pptx_render.keynote_slides(path, SLIDES, base)
+                NATIVE.pop(path, None)
+                send_all({"sync": "slides", "p": path})
+            except Exception as ex:          # niente Keynote o file che non apre: resta il disegno dell'app
+                NATIVE[path] = str(ex)[:200]
+        threading.Thread(target=job, daemon=True).start()
+        st = "in corso"
+    return dict(base, pending=st == "in corso", native_error=None if st == "in corso" else st)
 
 
 def install_update(asset):
@@ -841,6 +866,8 @@ class Handler(BaseHTTPRequestHandler):
         if p == "/api/slides":
             try:
                 d = pptx_render.describe(R(q.get("p", "")), SLIDES)
+                if q.get("native") and not d.get("pdf"):
+                    return self._json(native_slides(R(q.get("p", "")), d))
                 if d.get("pdf"):                    # l'uscita chiede le pagine con i testi modificati tolti
                     for sl in d["slides"]:
                         sl[0]["src"] = q.get("p", "")

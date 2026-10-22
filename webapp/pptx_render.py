@@ -14,6 +14,7 @@ import json
 import math
 import os
 import re
+import shutil
 
 from pptx import Presentation
 
@@ -929,6 +930,115 @@ def _animations(sld):
         for e in st:
             e.pop("n", None)
     return {"a": auto, "st": steps} if steps else None
+
+
+# ── diapositive identiche: le disegna Keynote ──
+_KEYNOTE_LOCK = None
+
+
+def keynote_slides(path, cache_root, base, cached_only=False):
+    """Fa disegnare la presentazione a Keynote (in sottofondo, una volta per file):
+    un'immagine per diapositiva e una per ogni passo delle animazioni. Il resto
+    (testi, transizioni) viene da `base`, cioè da describe(). None se Keynote non c'è o non riesce."""
+    import subprocess
+    import tempfile
+    import threading
+    import time
+    import fitz
+    global _KEYNOTE_LOCK
+    _KEYNOTE_LOCK = _KEYNOTE_LOCK or threading.Lock()
+    st = os.stat(path)
+    key = hashlib.md5(f"kn|{os.path.abspath(path)}|{st.st_mtime}|{st.st_size}|{CACHE_VERSION}".encode()).hexdigest()[:20]
+    out_dir = os.path.join(cache_root, key)
+    jpath = os.path.join(out_dir, "native.json")
+    if os.path.isfile(jpath):
+        with open(jpath, encoding="utf-8") as f:
+            return json.load(f)
+    if cached_only or not os.path.isdir("/Applications/Keynote.app"):
+        return None
+    with _KEYNOTE_LOCK:
+        if os.path.isfile(jpath):
+            with open(jpath, encoding="utf-8") as f:
+                return json.load(f)
+        tmp = tempfile.mkdtemp(prefix="sdarm-kn-", dir="/private/tmp")     # Keynote qui può scrivere (in /var/folders no)
+        src = os.path.join(tmp, "p" + os.path.splitext(path)[1])
+        shutil.copy2(path, src)
+        running = subprocess.run(["pgrep", "-x", "Keynote"], capture_output=True).returncode == 0
+        # percorsi scritti nel comando (così macOS dà a Keynote il permesso di usarli);
+        # «skipped slides» fa chiudere Keynote: non si usa
+        aq = lambda p: '"' + p.replace("\\", "\\\\").replace('"', '\\"') + '"'
+        if not running:                                      # Keynote acceso prima, in sottofondo: appena avviato non risponde bene
+            subprocess.run(["open", "-g", "-a", "Keynote"])
+            for _ in range(40):
+                if subprocess.run(["osascript", "-e", 'tell application "Keynote" to get version'], capture_output=True).returncode == 0:
+                    break
+                time.sleep(0.5)
+            time.sleep(1)
+        script = f"""with timeout of 90 seconds
+tell application "Keynote"
+  set n0 to count of documents
+  open POSIX file {aq(src)}
+  repeat 120 times
+    if (count of documents) > n0 then exit repeat
+    delay 0.5
+  end repeat
+  delay 1
+  set d to front document
+  export d to POSIX file {aq(os.path.join(tmp, "final.pdf"))} as PDF
+  export d to POSIX file {aq(os.path.join(tmp, "stages.pdf"))} as PDF with properties {{all stages:true}}
+  close d saving no
+  {"" if running else "quit"}
+end tell
+end timeout"""
+        try:
+            r = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=120)
+        except subprocess.TimeoutExpired:      # Keynote fermo su una finestra: si lascia perdere
+            r = subprocess.CompletedProcess([], 1, "", "Keynote non risponde")
+        if r.returncode != 0 and not running:
+            subprocess.run(["osascript", "-e", 'tell application "Keynote" to quit saving no'], capture_output=True, timeout=20)
+            shutil.rmtree(tmp, ignore_errors=True)
+        if r.returncode != 0 or not os.path.isfile(os.path.join(tmp, "stages.pdf")):
+            raise RuntimeError(("Keynote: " + (r.stderr or "").strip())[-300:])
+        os.makedirs(out_dir, exist_ok=True)
+        fin, stg = fitz.open(os.path.join(tmp, "final.pdf")), fitz.open(os.path.join(tmp, "stages.pdf"))
+        small = lambda pg: pg.get_pixmap(matrix=fitz.Matrix(64 / pg.rect.width, 64 / pg.rect.width), colorspace=fitz.csGRAY).samples
+        same = lambda a, b: len(a) == len(b) and sum(abs(x - y) for x, y in zip(a, b)) / max(1, len(a)) < 1.5
+        finals = [small(pg) for pg in fin]
+        # ogni diapositiva: i suoi passi finiscono con la pagina uguale a quella completa
+        stages, cur, k = [], [], 0
+        for j, pg in enumerate(stg):
+            cur.append(j)
+            if k < len(finals) and same(small(pg), finals[k]):
+                stages.append(cur)
+                cur, k = [], k + 1
+        if cur or len(stages) != len(fin):
+            stages = None                                   # non torna: niente passi, solo le diapositive
+        W, H = fin[0].rect.width, fin[0].rect.height
+        z = 1920 / W
+
+        def save(pg, name):
+            pg.get_pixmap(matrix=fitz.Matrix(z, z)).save(os.path.join(out_dir, name))
+            return key + "/" + name
+        slides = []
+        for i, pg in enumerate(fin):
+            imgs = [save(stg[j], f"s{j:04d}.png") for j in stages[i][:-1]] if stages else []
+            imgs.append(save(pg, f"f{i:04d}.png"))
+            img = lambda name, n: {"x": 0, "y": 0, "w": 1, "h": 1, "rot": 0, "m": 1, "stg": n, "img": name,
+                                         "svg": f'<svg viewBox="0 0 {W} {H}" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%"><image href="{{IMG}}{name}" width="{W}" height="{H}" preserveAspectRatio="none"/></svg>'}
+            slides.append([img(name, n) for n, name in enumerate(imgs)])
+        texts = (base.get("text") or []) + [""] * len(slides)
+        data = {"ratio": W / H, "slides": slides, "text": texts[:len(slides)], "native": True}
+        # animazioni che in PowerPoint partono da sole: il primo passo si mostra all'arrivo
+        anim = base.get("anim") or []
+        data["auto"] = [bool(i < len(anim) and anim[i] and anim[i]["a"] and len(sl) - 1 == len(anim[i]["st"])) for i, sl in enumerate(slides)]
+        if base.get("trans") and len(base["trans"]) == len(slides):
+            data["trans"] = base["trans"]
+        fin.close()
+        stg.close()
+        shutil.rmtree(tmp, ignore_errors=True)
+        with open(jpath, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+        return data
 
 
 def describe(path, cache_root):

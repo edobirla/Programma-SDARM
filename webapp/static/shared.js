@@ -103,6 +103,8 @@ window.slideHTML = (slide, idx, edit) => {
     const box = pos + (rot ? `transform:${rot};` : '');
     let html = '';
     // forma già disegnata dal motore (sfondi, sfumature, foto ritagliate, forme libere, contorni)
+    // passi di Keynote: tutte le immagini una sopra l'altra; si vede l'ultima (la diapositiva completa)
+    if (s0.stg != null) return `<div data-stg="${s0.stg}" style="position:absolute;inset:0;opacity:${s0.stg === slide.length - 1 ? 1 : 0}">${window.NO_MEDIA ? '' : s0.svg.split('{IMG}').join(SLIDE_IMG)}</div>`;
     if (s.svg) html += `<div style="${pos}${rot || flip ? `transform:${rot}${flip};` : ''}${s.fx ? `filter:${s.fx};` : ''}">${window.NO_MEDIA ? s.svg.replace(/<image[^>]*>/g, '') : s.svg.split('{IMG}').join(SLIDE_IMG)}</div>`;
     else {
       if (s.fill) html += `<div style="${box}background:${s.fill}"></div>`;

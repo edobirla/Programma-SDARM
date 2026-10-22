@@ -176,6 +176,7 @@ async function boot() {
     if (m.view) return;
     if (m.cmd || m.el) return REMOTE || runCmd(m);
     if (m.status) return REMOTE && applyStatus(m.status);
+    if (m.sync === 'slides') return nativeReady();
     if (m.sync) return m.from !== CLIENT && resync();
     if ('outputs' in m) { S.outputs = m.outputs; renderDock(); return; }
     const st = m.state || { kind: 'none' };
@@ -640,12 +641,22 @@ document.addEventListener('pointerdown', (e) => {
 
 /* diapositive vere dell'inno, disegnate dal PowerPoint */
 S.slidesCache = {};
-async function getSlides(p) {
+// presentazioni: diapositive identiche disegnate da Keynote (se il file non ha testi modificati nell'app)
+const slidesUrl = (p, native) => '/api/slides?p=' + encodeURIComponent(p) + (native ? '&native=1' : '');
+const deckNative = (p) => /\.pptx$/i.test(p || '') && !((hymnEdit(p) || {}).boxes);
+async function getSlides(p, native) {
   if (!p) return null;
-  if (!(p in S.slidesCache)) {
-    try { const r = await xfetch('/api/slides?p=' + encodeURIComponent(p)); S.slidesCache[p] = r.ok ? await r.json() : null; } catch (e) { S.slidesCache[p] = null; }
+  const u = slidesUrl(p, native);
+  if (!(u in S.slidesCache)) {
+    try { const r = await xfetch(u); S.slidesCache[u] = r.ok ? await r.json() : null; } catch (e) { S.slidesCache[u] = null; }
   }
-  return S.slidesCache[p];
+  return S.slidesCache[u];
+}
+// Keynote ha finito: si ridisegnano miniature e proiezione con le diapositive identiche
+function nativeReady() {
+  Object.keys(S.slidesCache).forEach((u) => { const d = S.slidesCache[u]; if (/&native=1$/.test(u) && d && d.pending) delete S.slidesCache[u]; });
+  hydrateThumbs();
+  if (S.live.kind === 'deck' && S.live.native && S.live.slotId) projDeck(S.live.slotId, S.live.i, S.live.b);
 }
 const hymnEdit = (p) => (S.settings.hymn_edits || {})[p] || null;
 const thumb = (data, i, edit, extra = '') => `<div class="slide pp" style="aspect-ratio:${data.ratio}" ${extra}>${slideHTML(data.slides[i], i, edit)}</div>`;
@@ -656,7 +667,7 @@ async function getPdf(p) {
 }
 async function hydrateThumbs() {
   for (const el of $$('[data-thumbs]')) {
-    const p = el.dataset.thumbs, data = await getSlides(p);
+    const p = el.dataset.thumbs, data = await getSlides(p, el.dataset.act === 'projDeck' && deckNative(p));
     if (!data) { el.innerHTML = '<div style="color:var(--faint)">Diapositive non leggibili: verrà proiettato il testo.</div>'; continue; }
     const live = +(el.dataset.live ?? -1), edit = hymnEdit(p);
     el.innerHTML = data.slides.map((_, i) => el.dataset.id
@@ -1280,7 +1291,7 @@ async function projHymn(h, i, slotId) {
   if (ap && base.dataset.p !== ap) { base.src = amedia(ap); base.dataset.p = ap; S.baseTitle = h.number + ' — ' + h.title; renderDock(); }
   $$('[data-thumbs] .slide-btn').forEach((b) => b.classList.toggle('live', +b.dataset.i === i && $('[data-thumbs]').dataset.thumbs === path));
 }
-async function projDeck(id, i) {
+async function projDeck(id, i, b) {
   const [, sl] = findSlot(id), p = sl.data.path, name = slotTitle(sl);
   const base = { kind: 'deck', file: p, slotId: id, label: name };
   if (/\.pdf$/i.test(p) && !hymnEdit(p)) {
@@ -1288,9 +1299,13 @@ async function projDeck(id, i) {
     i = Math.max(0, Math.min(pages.length - 1, i));
     setLive(Object.assign(base, { style: 'image', pages, image: pages[i], i, count: pages.length, sub: 'Pagina ' + (i + 1) + ' di ' + pages.length }));
   } else {
-    const data = await getSlides(p); if (!data) return toast('Questo file non si legge: aprilo in PowerPoint o Keynote e salvalo come .pptx');
+    const nat = deckNative(p), data = await getSlides(p, nat); if (!data) return toast('Questo file non si legge: aprilo in PowerPoint o Keynote e salvalo come .pptx');
+    if (data.pending && !S.natToast) { S.natToast = 1; toast('Preparo le diapositive identiche con Keynote… intanto vedi questa versione'); }
+    if (data.native_error && !S.natErr) { S.natErr = 1;
+      toast(/1743|autorizz|not allowed/i.test(data.native_error) ? 'Per le diapositive identiche permetti a Programma SDARM di usare Keynote: Impostazioni di Sistema › Privacy e sicurezza › Automazione'
+        : 'Keynote non è riuscito a disegnare questa presentazione: uso la versione dell\'app'); }
     i = Math.max(0, Math.min(data.slides.length - 1, i));
-    setLive(Object.assign(base, { style: 'pptx', edit: hymnEdit(p), texts: data.text, main: data.text[i] || '', i, count: data.slides.length, sub: (data.pdf ? 'Pagina ' : 'Diapositiva ') + (i + 1) + ' di ' + data.slides.length }));
+    setLive(Object.assign(base, { style: 'pptx', src: slidesUrl(p, nat), native: nat, b: data.pending ? 0 : b || 0, edit: hymnEdit(p), texts: data.text, main: data.text[i] || '', i, count: data.slides.length, sub: (data.pdf ? 'Pagina ' : 'Diapositiva ') + (i + 1) + ' di ' + data.slides.length }));
   }
   $$('[data-act="projDeck"] .slide-btn, [data-pdf] .slide-btn').forEach((b) => b.classList.toggle('live', +b.dataset.i === i));
 }
@@ -1303,7 +1318,9 @@ function vdur(p) {
 }
 function vset(o) { const L = S.live; setLive(Object.assign({}, L, { pos: vpos(L), at: Date.now() }, o), true); }
 // clic di animazione di una diapositiva PowerPoint (il passo che parte da solo non conta)
-const clicks = (L, i) => { const d = L.style === 'pptx' && S.slidesCache[L.file], A = d && d.anim && d.anim[i]; return A ? A.st.length - (A.a ? 1 : 0) : 0; };
+const clicks = (L, i) => { const d = L.style === 'pptx' && S.slidesCache[L.src || slidesUrl(L.file)];
+  if (d && d.native) return Math.max(0, d.slides[i].length - 1 - (d.auto && d.auto[i] ? 1 : 0));
+  const A = d && d.anim && d.anim[i]; return A ? A.st.length - (A.a ? 1 : 0) : 0; };
 function hymnGo(i, b = 0) {
   const L = S.live; i = Math.max(0, Math.min(L.count - 1, i));
   setLive(Object.assign({}, L, { i, b, main: (L.texts || [])[i] || '', image: L.pages ? L.pages[i] : L.image, sub: (L.pages ? 'Pagina ' : 'Diapositiva ') + (i + 1) + ' di ' + L.count }));
@@ -1347,11 +1364,19 @@ async function step(d) {
 }
 
 /* ── timer, musica di pausa, base, campanello ──────────────────────────── */
+// ordine a caso vero (Fisher–Yates); finito il giro si rimescola, senza ripetere subito l'ultimo brano
+function shuffle(a, last) {
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  if (last && a.length > 1 && a[0] === last) [a[0], a[1]] = [a[1], a[0]];
+  return a;
+}
+function pmAdvance(d) { const n = S.pm.files.length; if (!n) return;
+  if (d > 0 && S.pm.idx + 1 >= n) { shuffle(S.pm.files, S.pm.files[S.pm.idx]); S.pm.idx = 0; } else S.pm.idx = (S.pm.idx + d + n) % n; }
 function pmTitle() { const f = S.pm.files[S.pm.idx]; return f ? f.split('/').pop().replace(/\.[^.]+$/, '') : 'Nessun brano'; }
 async function pmLoad() {
   if (!S.pm.files.length) {
     const folder = S.settings.background_music_folder;
-    S.pm.files = folder ? (await api.get('/api/audiofiles?folder=' + encodeURIComponent(folder))).sort(() => Math.random() - .5) : [];
+    S.pm.files = folder ? (await api.get('/api/audiofiles?folder=' + encodeURIComponent(folder))) : []; shuffle(S.pm.files); S.pm.idx = 0;
   }
   const a = $('#pmAudio'); const f = S.pm.files[S.pm.idx];
   if (f && a.dataset.p !== f) { a.src = amedia(f); a.dataset.p = f; }
@@ -1416,7 +1441,7 @@ function setupAudio() {
   wireBase($('#baseAudio'));
   ['timeupdate', 'play', 'pause', 'loadedmetadata'].forEach((e) => $('#pmAudio').addEventListener(e, upd));
   if (!REMOTE) ['play', 'pause', 'loadedmetadata', 'seeked', 'ended', 'volumechange', 'emptied', 'ratechange'].forEach((e) => $('#pmAudio').addEventListener(e, sendStatus));
-  $('#pmAudio').addEventListener('ended', () => { S.pm.idx = (S.pm.idx + 1) % S.pm.files.length; pmPlay(); const t = $('[data-player="pm"] [data-ptitle]'); if (t) t.textContent = pmTitle(); });
+  $('#pmAudio').addEventListener('ended', () => { pmAdvance(1); pmPlay(); const t = $('[data-player="pm"] [data-ptitle]'); if (t) t.textContent = pmTitle(); });
   document.addEventListener('pointerdown', (e) => { if (e.target.matches('[data-seek]')) seeking = true; });
   document.addEventListener('pointerup', () => { seeking = false; });
   document.addEventListener('input', (e) => {
@@ -1803,7 +1828,7 @@ const act = {
     if (he.data.slides.length < 2) return toast('Un inno deve avere almeno una diapositiva');
     if (he.confirm !== i) { he.confirm = i; return heShow(); }
     const r = await api.post('/api/hymn/slide-delete', { path: he.path, index: i }); if (!r.ok) return toast('Non sono riuscito a eliminarla');
-    delete S.slidesCache[he.path]; const data = await getSlides(he.path); if (!data) return closeModal();
+    delete S.slidesCache[slidesUrl(he.path)]; const data = await getSlides(he.path); if (!data) return closeModal();
     const t = {}; Object.entries(he.texts).forEach(([k, v]) => { k = +k; if (k !== i) t[k - (k > i)] = v; });
     const eds = Object.assign({}, S.settings.hymn_edits || {}); if (r.edit) eds[he.path] = r.edit; S.settings.hymn_edits = eds;
     Object.assign(he, { data, texts: t, i: Math.min(i, data.slides.length - 1), confirm: -1 }); renderHymnEditor(); renderMain(); toast('Diapositiva eliminata'); },
@@ -1969,8 +1994,8 @@ const act = {
   mediaDelGo: async (el, d) => { closeModal(); await api.post('/api/library/remove', { path: S.media[+d.i].path }); loadMedia(); },
   audioRestart: (el, d) => { const a = d.k === 'pm' ? $('#pmAudio') : $('#baseAudio'); a.currentTime = 0; },
   audioOff: (el, d) => { if (d.k === 'pm') { $('#pmAudio').pause(); S.pm.on = false; } else { const a = $('#baseAudio'); a.pause(); a.removeAttribute('src'); a.dataset.p = ''; a.load(); } renderDock(); },
-  pmPrev: () => { S.pm.idx = (S.pm.idx - 1 + S.pm.files.length) % S.pm.files.length; pmPlay(); },
-  pmNext: () => { S.pm.idx = (S.pm.idx + 1) % S.pm.files.length; pmPlay(); },
+  pmPrev: () => { pmAdvance(-1); pmPlay(); },
+  pmNext: () => { pmAdvance(1); pmPlay(); },
   // dock
   step: (el, d) => step(+d.d), stop: () => { stopLive(); if (REMOTE) $('#dock').classList.remove('ropen'); },
   overlay: (el, d) => { S.live.overlay = S.live.overlay === d.v ? null : d.v; pushLive(); },
