@@ -47,7 +47,7 @@ from pptx import Presentation              # noqa: E402
 STATIC = os.path.join(ROOT, "webapp", "static")
 ASSETS = os.path.join(ROOT, "assets")
 PORT = int(os.environ.get("SDARM_PORT") or os.environ.get("PORT") or "8765")
-VERSION = "2.0.7"
+VERSION = "2.0.8"
 # identifica questa copia dell'app: l'avvio spegne i motori di versioni precedenti
 BUILD = str(int(os.path.getmtime(sys.executable if FROZEN else os.path.abspath(__file__))))
 AUDIO_EXT = (".mp3", ".m4a", ".wav", ".ogg", ".aac", ".flac")

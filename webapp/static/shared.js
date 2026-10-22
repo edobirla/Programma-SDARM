@@ -118,18 +118,19 @@ window.slideHTML = (slide, idx, edit) => {
         if (bx.f || bx.c || bx.a) paras = paras.map((p) => Object.assign({}, p, bx.a ? { a: bx.a } : {},
           { runs: p.runs.map((r) => Object.assign({}, r, bx.f ? { f: bx.f } : {}, bx.c ? { c: bx.c } : {})) }));
       }
-      const para = (p) => {
+      const para = (p, j) => {
         const st = `text-align:${p.a};font-size:calc(${p.s * sc * 100}cqh * var(--af, 1));min-height:1em;flex-shrink:0;`
           + (p.lha ? `line-height:calc(${p.lha * sc * 100}cqh * var(--af, 1));` : p.lh ? `line-height:${p.lh};` : '')
           + (p.sb ? `margin-top:${p.sb * sc * 100}cqh;` : '') + (p.sa ? `margin-bottom:${p.sa * sc * 100}cqh;` : '')
           + (p.ml || p.ind ? `padding-left:${p.ml * 100}cqw;text-indent:${p.ind * 100}cqw;` : '');
         const bu = p.bu ? `<span style="display:inline-block;text-indent:0;${p.ind < 0 ? `min-width:${-p.ind * 100}cqw;` : 'margin-right:.4em;'}color:${p.bu.c};font-size:${p.bu.s * 100}%">${e(p.bu.t)}</span>` : '';
-        return `<div style="${st}">${bu}${p.runs.map((r) => `<span style="font-size:${(r.s / (p.s || r.s || 1)) * 100}%;font-family:'${e(r.f)}','Helvetica Neue',Helvetica,sans-serif;${r.b ? 'font-weight:700;' : ''}${r.i ? 'font-style:italic;' : ''}${r.cap ? 'text-transform:uppercase;' : ''}${r.u ? 'text-decoration:underline;' : ''}${r.bl ? `vertical-align:${r.bl * 100}%;font-size:${(r.s / (p.s || r.s || 1)) * 66}%;` : ''}${r.c ? 'color:' + r.c : ''}">${e(r.t)}</span>`).join('')}</div>`;
+        return `<div data-pi="${j}" style="${st}">${bu}${p.runs.map((r) => `<span style="font-size:${(r.s / (p.s || r.s || 1)) * 100}%;font-family:'${e(r.f)}','Helvetica Neue',Helvetica,sans-serif;${r.b ? 'font-weight:700;' : ''}${r.i ? 'font-style:italic;' : ''}${r.cap ? 'text-transform:uppercase;' : ''}${r.u ? 'text-decoration:underline;' : ''}${r.bl ? `vertical-align:${r.bl * 100}%;font-size:${(r.s / (p.s || r.s || 1)) * 66}%;` : ''}${r.c ? 'color:' + r.c : ''}">${e(r.t)}</span>`).join('')}</div>`;
       };
       html += `<div class="sl-text${t.fit ? ' af' : ''}" style="${box}display:flex;flex-direction:column;justify-content:${t.anchor};padding:${pad[1] * 100}cqh ${pad[2] * 100}cqw ${pad[3] * 100}cqh ${pad[0] * 100}cqw;box-sizing:border-box;white-space:${t.nowrap ? 'pre' : 'pre-wrap'};overflow-wrap:break-word">`
         + paras.map(para).join('') + '</div>';
     }
-    return html;
+    // forma animabile: un contenitore grande quanto la diapositiva, che ruota/ingrandisce attorno al centro della forma
+    return s.id && html ? `<div data-sp="${s.id}" data-bb="${s.x} ${s.y} ${s.w} ${s.h}" style="position:absolute;inset:0;pointer-events:none;transform-origin:${(s.x + s.w / 2) * 100}% ${(s.y + s.h / 2) * 100}%">${html}</div>` : html;
   }).join('');
 };
 

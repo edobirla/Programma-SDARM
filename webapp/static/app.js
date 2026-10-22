@@ -1302,9 +1302,11 @@ function vdur(p) {
   return S.vdur[p];
 }
 function vset(o) { const L = S.live; setLive(Object.assign({}, L, { pos: vpos(L), at: Date.now() }, o), true); }
-function hymnGo(i) {
+// clic di animazione di una diapositiva PowerPoint (il passo che parte da solo non conta)
+const clicks = (L, i) => { const d = L.style === 'pptx' && S.slidesCache[L.file], A = d && d.anim && d.anim[i]; return A ? A.st.length - (A.a ? 1 : 0) : 0; };
+function hymnGo(i, b = 0) {
   const L = S.live; i = Math.max(0, Math.min(L.count - 1, i));
-  setLive(Object.assign({}, L, { i, main: (L.texts || [])[i] || '', image: L.pages ? L.pages[i] : L.image, sub: (L.pages ? 'Pagina ' : 'Diapositiva ') + (i + 1) + ' di ' + L.count }));
+  setLive(Object.assign({}, L, { i, b, main: (L.texts || [])[i] || '', image: L.pages ? L.pages[i] : L.image, sub: (L.pages ? 'Pagina ' : 'Diapositiva ') + (i + 1) + ' di ' + L.count }));
   $$('[data-thumbs] .slide-btn').forEach((b) => b.classList.toggle('live', +b.dataset.i === i));
 }
 function projPrayer(i) {
@@ -1320,8 +1322,13 @@ function projPrayers() {
 }
 async function step(d) {
   const L = S.live;
-  if (L.kind === 'hymn' || L.kind === 'deck') hymnGo(L.i + d);
-  else if (L.kind === 'verse') {
+  if (L.kind === 'hymn' || L.kind === 'deck') {
+    // prima le animazioni della diapositiva, poi la diapositiva dopo (indietro: la precedente già completa)
+    const b = L.b || 0, n = clicks(L, L.i);
+    if (d > 0 && b < n) setLive(Object.assign({}, L, { b: b + 1, sub: 'Diapositiva ' + (L.i + 1) + ' di ' + L.count + ' · animazione ' + (b + 1) + ' di ' + n }), true);
+    else if (d < 0 && b > 0) setLive(Object.assign({}, L, { b: b - 1 }), true);
+    else hymnGo(L.i + d, d < 0 && L.i > 0 ? clicks(L, L.i - 1) : 0);
+  } else if (L.kind === 'verse') {
     let { book, chapter, verse } = L; verse += d;
     const vs = await api.get(`/api/bible/verses?lang=${lang()}&book=${book}&ch=${chapter}`);
     if (verse < 1 || verse > vs.length) return;

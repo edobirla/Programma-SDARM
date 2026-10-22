@@ -218,7 +218,7 @@ function show(s) {
   $('#sfondo').classList.toggle('on', ov === 'sfondo');
   if (ST.background_image) $('#sfondo').style.background = `url("${media(ST.background_image)}") center/contain no-repeat #000`;
   if (ov === 'congela') return;                       // la sala resta ferma
-  const key = JSON.stringify(Object.assign({}, s, { hl: null, zoom: null, overlay: null, from: null, playing: null, pos: null, at: null, vrate: null, iz: null, icx: null, icy: null, ptr: null }));
+  const key = JSON.stringify(Object.assign({}, s, { hl: null, zoom: null, overlay: null, from: null, playing: null, pos: null, at: null, vrate: null, iz: null, icx: null, icy: null, ptr: null, draw: null, b: null, sub: null }));
   if (key !== shownKey) {
     // PowerPoint: la transizione scelta nel file; il resto sfuma (niente tagli netti)
     const tr = !PREVIEW && s.style === 'pptx' && slidesCache[s.file] ? (slidesCache[s.file].trans || [])[s.i] : null;
@@ -246,6 +246,68 @@ function show(s) {
   syncVideo(s);
   syncImage(s);
   highlight(s);
+  applyBuild(s);
+}
+
+/* ── animazioni dei PowerPoint: un passo per ogni «Avanti» ─────────────── */
+let built = { key: '', b: -1 };
+function applyBuild(s) {
+  const d = s.style === 'pptx' && slidesCache[s.file], A = d && d.anim && d.anim[s.i];
+  const key = shownKey + '|' + s.file + '|' + s.i;
+  if (!A) { built = { key, b: -1 }; return; }
+  const b = s.b || 0, done = (A.a ? 1 : 0) + b, fresh = built.key !== key;
+  // si anima solo il passo appena chiesto (o quello che parte da solo all'arrivo); il resto si imposta subito
+  const play = fresh ? (A.a && b === 0 ? 0 : -1) : (b === built.b + 1 ? done - 1 : -1);
+  if (!fresh && b === built.b) return;
+  built = { key, b };
+  buildState(A.st, play >= 0 ? play : Math.min(done, A.st.length));
+  if (play >= 0 && A.st[play]) A.st[play].forEach(runEffect);
+}
+const animEls = (e) => { const w = [...document.querySelectorAll(`#content [data-sp~="${e.s}"]`)];
+  return e.p ? w.flatMap((x) => [...x.querySelectorAll('[data-pi]')].filter((p) => +p.dataset.pi >= e.p[0] && +p.dataset.pi <= e.p[1])) : w; };
+const effKey = (e) => e.s + (e.p ? ':' + e.p.join('-') : '');
+// come si vede ogni oggetto dopo i primi n passi (nascosto se deve ancora entrare, sparito se è uscito)
+function buildState(steps, n) {
+  const all = steps.flat(), first = {}, end = {};
+  all.forEach((e) => { const k = effKey(e); if (!(k in first)) first[k] = e; });
+  Object.values(first).forEach((e) => { end[effKey(e)] = { vis: e.c !== 'entr', tf: '' }; });
+  steps.slice(0, n).flat().forEach((e) => { const st = end[effKey(e)];
+    if (e.c === 'entr') st.vis = true; else if (e.c === 'exit') st.vis = false; else { const t = finalTf(e); if (t) st.tf = t; } });
+  Object.values(first).forEach((e) => animEls(e).forEach((el) => { el.getAnimations().forEach((a) => a.cancel());
+    const st = end[effKey(e)]; el.style.visibility = st.vis ? '' : 'hidden'; el.style.transform = st.tf; }));
+}
+const finalTf = (e) => (e.k === 'path' ? `translate(${e.to[0] * 100}%, ${e.to[1] * 100}%)` : e.k === 'scale' && e.by ? `scale(${e.by[0]}, ${e.by[1]})` : e.k === 'spin' ? `rotate(${e.by}deg)` : '');
+function insets(el) {   // il riquadro della forma, dentro il contenitore grande quanto la diapositiva (in %)
+  const b = el.dataset.bb ? el.dataset.bb.split(' ').map(Number) : [0, 0, 1, 1];
+  return { t: b[1] * 100, r: (1 - b[0] - b[2]) * 100, b: (1 - b[1] - b[3]) * 100, l: b[0] * 100, cx: (b[0] + b[2] / 2) * 100, cy: (b[1] + b[3] / 2) * 100 };
+}
+function effFrames(e, el) {
+  const I = insets(el), box = `inset(${I.t}% ${I.r}% ${I.b}% ${I.l}%)`, ins = (t, r, b, l) => `inset(${t}% ${r}% ${b}% ${l}%)`;
+  if (e.k === 'fly') { const dx = e.dir.includes('l') ? -100 : e.dir.includes('r') ? 100 : 0, dy = e.dir.includes('t') ? -100 : e.dir.includes('b') ? 100 : 0;
+    return [{ transform: `translate(${dx}%, ${dy}%)` }, { transform: 'none' }]; }
+  if (e.k === 'scale' && e.c === 'entr') return [{ transform: 'scale(0)', opacity: 0 }, { transform: 'none', opacity: 1 }];
+  if (e.k === 'appear') return [{ opacity: 0 }, { opacity: 1 }];
+  if (e.k === 'filter') {
+    const f = e.f || '', m = /\((\w+)\)/.exec(f), dir = m ? m[1] : '';
+    if (f.startsWith('wipe')) return [{ clipPath: { down: ins(I.t, I.r, 100 - I.t, I.l), up: ins(100 - I.b, I.r, I.b, I.l), right: ins(I.t, 100 - I.l, I.b, I.l), left: ins(I.t, I.r, I.b, 100 - I.r) }[dir] || ins(I.t, I.r, 100 - I.t, I.l) }, { clipPath: box }];
+    if (f.startsWith('barn')) { const v = /Vertical/.test(dir); return [{ clipPath: v ? ins(I.t, 100 - I.cx, I.b, I.cx) : ins(I.cy, I.r, 100 - I.cy, I.l) }, { clipPath: box }]; }
+    if (/^(circle|wheel|plus|diamond|box)/.test(f)) return [{ clipPath: `circle(0% at ${I.cx}% ${I.cy}%)` }, { clipPath: `circle(150% at ${I.cx}% ${I.cy}%)` }];
+    if (f.startsWith('slide')) { const dy = /Bottom/.test(dir) ? 100 : /Top/.test(dir) ? -100 : 0, dx = /Left/.test(dir) ? -100 : /Right/.test(dir) ? 100 : 0;
+      return [{ transform: `translate(${dx}%, ${dy}%)` }, { transform: 'none' }]; }
+    return [{ opacity: 0 }, { opacity: 1 }];       // dissolvenza e simili
+  }
+  return null;
+}
+function runEffect(e) {
+  animEls(e).forEach((el) => {
+    const o = { duration: Math.max(1, e.d), delay: e.t || 0, easing: 'ease-in-out' };
+    if (e.c === 'entr') { el.style.visibility = ''; el.animate(effFrames(e, el) || [{ opacity: 0 }, { opacity: 1 }], Object.assign(o, { fill: 'backwards' })); }
+    else if (e.c === 'exit') { const a = el.animate((effFrames(e, el) || [{ opacity: 0 }, { opacity: 1 }]).slice().reverse(), Object.assign(o, { fill: 'forwards' }));
+      a.onfinish = () => { el.style.visibility = 'hidden'; a.cancel(); }; }
+    else { const t = finalTf(e);
+      if (t) { const a = el.animate([{ transform: el.style.transform || 'none' }, { transform: t }], Object.assign(o, { fill: 'forwards' })); a.onfinish = () => { el.style.transform = t; a.cancel(); }; }
+      else el.animate([{ transform: 'none' }, { transform: 'scale(1.08)' }, { transform: 'none' }], o); }   // risalto: un battito
+  });
 }
 
 /* immagini: zoom verso un punto e puntatore luminoso per indicare in sala */

@@ -22,7 +22,7 @@ P = "{http://schemas.openxmlformats.org/presentationml/2006/main}"
 R = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
 MC = "{http://schemas.openxmlformats.org/markup-compatibility/2006}"
 R_EMBED = R + "embed"
-CACHE_VERSION = 6
+CACHE_VERSION = 7
 
 COLOR_TAGS = {A + t for t in ("srgbClr", "schemeClr", "sysClr", "prstClr", "scrgbClr", "hslClr")}
 PRESET = {"black": "000000", "white": "FFFFFF", "red": "FF0000", "green": "008000", "blue": "0000FF", "yellow": "FFFF00",
@@ -699,19 +699,19 @@ class Walker:
         res["is_title"] = t in ("title", "ctrTitle")
         return res
 
-    def walk(self, tree, tf, group_fill=None):
+    def walk(self, tree, tf, group_fill=None, gids=()):
         for el in tree:
             t = _local(el)
             if t == "AlternateContent":
                 pick = el.find(f"{MC}Fallback")
                 pick = pick if pick is not None else el.find(f"{MC}Choice")
                 if pick is not None:
-                    self.walk(pick, tf, group_fill)
+                    self.walk(pick, tf, group_fill, gids)
             elif t == "grpSp":
                 x = _xfrm(el)
                 b = _box(x) if x is not None else None
                 if b is None:
-                    self.walk(el, tf, group_fill)
+                    self.walk(el, tf, group_fill, gids)
                     continue
                 cho, che = x.find(f"{A}chOff"), x.find(f"{A}chExt")
                 chx, chy = _int(cho, "x"), _int(cho, "y")
@@ -737,11 +737,12 @@ class Walker:
 
                 gsp = el.find(f"{P}grpSpPr")
                 gf = fill_of(self.deck, gsp, None, self.cmap, self.part, group_fill) if gsp is not None else group_fill
-                self.walk(el, child, gf)
+                gid = el.find(f"{P}nvGrpSpPr/{P}cNvPr")
+                self.walk(el, child, gf, gids + ((gid.get("id"),) if gid is not None else ()))
             elif t in ("sp", "pic", "cxnSp"):
-                self.shape(el, tf, group_fill)
+                self.shape(el, tf, group_fill, gids)
 
-    def shape(self, el, tf, group_fill):
+    def shape(self, el, tf, group_fill, gids=()):
         d = self.deck
         nv = next((k for k in el if _local(k).startswith("nv")), None)
         cnv = nv.find(f"{P}cNvPr") if nv is not None else None
@@ -786,6 +787,8 @@ class Walker:
             out["fill"] = css(paint["c"])
         if self.layer != "slide":
             out["m"] = 1
+        elif cnv is not None and cnv.get("id"):
+            out["id"] = " ".join((cnv.get("id"),) + gids)      # per le animazioni (anche quelle del gruppo)
         if text:
             out["text"] = text
             out["pad"] = [v / d.W if i % 2 == 0 else v / d.H for i, v in enumerate(text["pad"])]
@@ -835,6 +838,99 @@ def _transition(sld):
     return out
 
 
+# ── animazioni (p:timing) ──
+def _ctn_delay(ctn):
+    c = ctn.find(f"{P}stCondLst/{P}cond") if ctn is not None else None
+    d = c.get("delay") if c is not None else None
+    return int(d) if d and d.lstrip("-").isdigit() else 0
+
+
+def _effect(ectn):
+    """Un effetto: bersaglio, tipo e parametri, letti dai comportamenti che contiene."""
+    beh = [k for k in ectn.find(f"{P}childTnLst") if isinstance(k.tag, str)] if ectn.find(f"{P}childTnLst") is not None else []
+    tgt = next((b.find(f".//{P}spTgt") for b in beh if b.find(f".//{P}spTgt") is not None), None)
+    if tgt is None:
+        return None
+    e = {"s": tgt.get("spid"), "c": {"entr": "entr", "exit": "exit", "emph": "emph", "path": "path"}.get(ectn.get("presetClass"), "emph")}
+    rg = tgt.find(f"{P}txEl/{P}pRg")
+    if rg is not None:
+        e["p"] = [_int(rg, "st"), _int(rg, "end")]
+    durs = [int(d) for b in beh for c in b.iter(f"{P}cTn") for d in [c.get("dur")] if d and d.isdigit()]
+    e["d"] = max(durs) if durs else 500
+    tag = lambda n: [b for b in beh if _local(b) == n]
+    if tag("animMotion"):
+        m = re.findall(r"-?\d*\.?\d+(?:[eE]-?\d+)?", tag("animMotion")[0].get("path", ""))
+        e.update(k="path", to=[float(m[-2]), float(m[-1])] if len(m) >= 2 else [0, 0])
+        e["c"] = "path"
+    elif tag("animEffect"):
+        e.update(k="filter", f=tag("animEffect")[0].get("filter", "fade"))
+    elif any(b.find(f"{P}cBhvr/{P}attrNameLst/{P}attrName") is not None and b.find(f"{P}cBhvr/{P}attrNameLst/{P}attrName").text in ("ppt_x", "ppt_y") for b in tag("anim")):
+        d = ""
+        for b in tag("anim"):
+            name = b.find(f"{P}cBhvr/{P}attrNameLst/{P}attrName").text
+            vals = [v.get("val", "") for v in b.iter(f"{P}strVal")]
+            v = (vals[0] if e["c"] == "entr" else vals[-1]) if vals else ""
+            if name == "ppt_x" and v.startswith("0-"):
+                d += "l"
+            elif name == "ppt_x" and v.startswith("1+"):
+                d += "r"
+            elif name == "ppt_y" and v.startswith("0-"):
+                d += "t"
+            elif name == "ppt_y" and v.startswith("1+"):
+                d += "b"
+        e.update(k="fly", dir=d or "b")
+    elif tag("animScale"):
+        by = tag("animScale")[0].find(f"{P}by")
+        e.update(k="scale", by=[_int(by, "x", 100000) / 100000, _int(by, "y", 100000) / 100000] if by is not None else None)
+    elif tag("animRot"):
+        e.update(k="spin", by=_int(tag("animRot")[0], "by", 21600000) / 60000)
+    elif tag("set"):
+        e["k"] = "appear"
+        e["d"] = 1
+    else:
+        e["k"] = "pulse"
+    return e
+
+
+def _animations(sld):
+    """Sequenza principale: un elenco di passi (uno per clic); "a" = il primo passo
+    parte da solo quando arriva la diapositiva. Ogni effetto ha t (ms dall'inizio del passo)."""
+    main = next((c for c in sld.iter(f"{P}cTn") if c.get("nodeType") == "mainSeq"), None)
+    if main is None or main.find(f"{P}childTnLst") is None:
+        return None
+    steps, auto = [], False
+    for g in main.find(f"{P}childTnLst"):
+        gctn = g.find(f"{P}cTn")
+        effs = []
+        for sub in (gctn.find(f"{P}childTnLst") if gctn is not None and gctn.find(f"{P}childTnLst") is not None else []):
+            sctn = sub.find(f"{P}cTn")
+            for ep in (sctn.find(f"{P}childTnLst") if sctn is not None and sctn.find(f"{P}childTnLst") is not None else []):
+                ectn = ep.find(f"{P}cTn")
+                if ectn is None:
+                    continue
+                e = _effect(ectn)
+                if e:
+                    e["t"] = _ctn_delay(sctn) + _ctn_delay(ectn)
+                    e["n"] = ectn.get("nodeType", "")
+                    effs.append(e)
+        if not effs:
+            continue
+        if effs[0]["n"] != "clickEffect":
+            if not steps:
+                auto = True
+            else:                                   # parte da solo dopo il passo prima
+                end = max(x["t"] + x["d"] for x in steps[-1])
+                for e in effs:
+                    e["t"] += end
+                steps[-1] += effs
+                continue
+        steps.append(effs)
+    for st in steps:
+        for e in st:
+            e.pop("n", None)
+    return {"a": auto, "st": steps} if steps else None
+
+
 def describe(path, cache_root):
     """{ratio, slides: [[shape,…]], text: [str], trans: [..]} — cached per file content."""
     st = os.stat(path)
@@ -852,7 +948,7 @@ def describe(path, cache_root):
         return data
     prs = Presentation(path)
     deck = Deck(prs, out_dir, key)
-    slides, texts, trans = [], [], []
+    slides, texts, trans, anims = [], [], [], []
     ident = lambda b: b
     for slide in prs.slides:
         layout = slide.slide_layout
@@ -893,9 +989,12 @@ def describe(path, cache_root):
         texts.append("\n".join("\n".join("".join(r["t"] for r in p["runs"]) for p in s["text"]["paras"])
                                for s in shapes if "text" in s and not s.get("m")).strip())
         trans.append(_transition(slide.element))
+        anims.append(_animations(slide.element))
     data = {"ratio": deck.W / deck.H, "slides": slides, "text": texts}
     if any(trans):
         data["trans"] = trans
+    if any(anims):
+        data["anim"] = anims
     with open(jpath, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False)
     return data
