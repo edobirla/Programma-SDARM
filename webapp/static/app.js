@@ -1573,7 +1573,7 @@ function setupDrag() {
 let viewT = 0, viewPending = false;
 function pushView() {
   if (viewT) { viewPending = true; return; }
-  const send = () => { const L = S.live; api.post('/api/cmd', { view: { ptr: L.ptr || null, iz: L.iz || 1, icx: L.icx ?? 0.5, icy: L.icy ?? 0.5 } }); };
+  const send = () => { const L = S.live; api.post('/api/cmd', { view: { ptr: L.ptr || null, draw: !!(L.draw && L.ptr), iz: L.iz || 1, icx: L.icx ?? 0.5, icy: L.icy ?? 0.5 } }); };
   send();
   viewT = setTimeout(() => { viewT = 0; if (viewPending) { viewPending = false; pushView(); } }, 25);
 }
@@ -1586,6 +1586,9 @@ function setupPreviewTools() {
   document.addEventListener('wheel', (e) => { const pv = box(e); if (!pv || !isImg()) return; e.preventDefault(); const [x, y] = frac(pv, e);
     const z = Math.min(6, Math.max(1, (S.live.iz || 1) * (e.deltaY < 0 ? 1.12 : 0.89)));
     if ((S.live.iz || 1) === 1) { S.live.icx = x; S.live.icy = y; } S.live.iz = z; pushView(); renderDock(); }, { passive: false });
+  // puntatore acceso: tenendo premuto il tasto si disegna una scia, lasciandolo sparisce
+  document.addEventListener('pointerdown', (e) => { const pv = box(e); if (pv && S.ptrOn && S.live.kind !== 'none' && e.button === 0) {
+    e.preventDefault(); pv.setPointerCapture(e.pointerId); S.live.draw = true; S.live.ptr = frac(pv, e); pushView(); } });
   document.addEventListener('pointerdown', (e) => { const pv = box(e); if (pv && isImg() && (S.live.iz || 1) > 1 && !S.ptrOn) { drag = { pv, f: frac(pv, e), cx: S.live.icx ?? 0.5, cy: S.live.icy ?? 0.5 }; pv.setPointerCapture(e.pointerId); } });
   document.addEventListener('pointermove', (e) => {
     if (drag) { const [x, y] = frac(drag.pv, e), z = S.live.iz || 1; S.live.icx = Math.min(1, Math.max(0, drag.cx - (x - drag.f[0]) / (z - 1 || 1))); S.live.icy = Math.min(1, Math.max(0, drag.cy - (y - drag.f[1]) / (z - 1 || 1))); pushView(); return; }
@@ -1593,7 +1596,7 @@ function setupPreviewTools() {
     if (pv && S.ptrOn && S.live.kind !== 'none') { S.live.ptr = frac(pv, e); pushView(); }
     else if (!pv && S.ptrOn && S.live.ptr) { S.live.ptr = null; pushView(); }      // uscito dall'anteprima: il puntatore sparisce
   });
-  document.addEventListener('pointerup', () => { drag = null; });
+  document.addEventListener('pointerup', () => { drag = null; if (S.live.draw) { S.live.draw = false; pushView(); } });
 }
 
 /* ── evidenziazione trascinando sulle parole ───────────────────────────── */

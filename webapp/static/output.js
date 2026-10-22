@@ -252,7 +252,12 @@ function syncImage(s) {
   const p = $('#ptr');
   p.classList.toggle('on', !!s.ptr);
   if (s.ptr) { p.style.left = s.ptr[0] * 100 + '%'; p.style.top = s.ptr[1] * 100 + '%'; }
+  // scia: si allunga mentre il tasto è premuto, sparisce appena si lascia
+  if (s.draw && s.ptr) trail.push(s.ptr); else trail = [];
+  $('#trail').innerHTML = trail.length > 1 ? `<path d="M${trail.map((q) => (q[0] * 1000).toFixed(1) + ' ' + (q[1] * 1000).toFixed(1)).join('L')}" fill="none" stroke="rgba(240,40,40,.9)"
+    stroke-width="${Math.max(3, H() * 0.012)}" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>` : '';
 }
+let trail = [];
 
 /* video: segue play/pausa/posizione del pannello; l'anteprima resta muta */
 function syncVideo(s) {
