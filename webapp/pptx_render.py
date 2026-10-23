@@ -954,8 +954,11 @@ def keynote_slides(path, cache_root, base, cached_only=False):
     if os.path.isfile(jpath):
         with open(jpath, encoding="utf-8") as f:
             return json.load(f)
-    if cached_only or not os.path.isdir("/Applications/Keynote.app"):
+    if cached_only:
         return None
+    # Keynote ovunque sia installato; se manca è un errore (non un «pronto» vuoto, che faceva ripartire tutto all'infinito)
+    if subprocess.run(["open", "-Ra", "Keynote"], capture_output=True).returncode != 0:
+        raise RuntimeError("Keynote non è installato")
     with _KEYNOTE_LOCK:
         if os.path.isfile(jpath):
             with open(jpath, encoding="utf-8") as f:

@@ -177,6 +177,9 @@ async function boot() {
     if (m.cmd || m.el) return REMOTE || runCmd(m);
     if (m.status) return REMOTE && applyStatus(m.status);
     if (m.sync === 'slides') return nativeReady();
+    if (m.natErr) { if (!S.natErr) { S.natErr = 1; toast(/installato/.test(m.natErr) ? 'Keynote non c\'è su questo Mac: installalo gratis dall\'App Store per avere le diapositive identiche. Intanto uso la versione dell\'app'
+      : /1743|autorizz|not allowed/i.test(m.natErr) ? 'Per le diapositive identiche permetti a Programma SDARM di usare Keynote: Impostazioni di Sistema › Privacy e sicurezza › Automazione'
+      : 'Keynote non è riuscito a preparare la presentazione: uso la versione dell\'app'); } return; }
     if (m.sync) return m.from !== CLIENT && resync();
     if ('outputs' in m) { S.outputs = m.outputs; renderDock(); return; }
     const st = m.state || { kind: 'none' };
@@ -256,7 +259,7 @@ async function loadHymns(force) {
   if (force || !S.hymnsBy[db]) {
     const r = await api.get('/api/hymns?db=' + encodeURIComponent(db) + (REMOTE ? '&lite=1' : ''));
     S.hymnsBy[db] = r.hymns || [];
-    S.hymnsBy[db].forEach((h) => { h._k = (h.number + ' ' + h.title).toLowerCase(); h._t = (h.slides || []).join(' · ').toLowerCase(); });   // ricerca veloce
+    S.hymnsBy[db].forEach((h) => { h._k = fold(h.number + ' ' + h.title); h._t = fold((h.slides || []).join(' · ')); h._tt = fold(h.title); });   // ricerca veloce
   }
   if (db !== S.hymnsDb) return;
   S.hymns = S.hymnsBy[db];
@@ -653,10 +656,14 @@ async function getSlides(p, native) {
   return S.slidesCache[u];
 }
 // Keynote ha finito: si ridisegnano miniature e proiezione con le diapositive identiche
-function nativeReady() {
+async function nativeReady() {
+  const waiting = S.live.kind === 'deck' && S.live.native && S.live.slotId && S.slidesCache[S.live.src] && S.slidesCache[S.live.src].pending;
   Object.keys(S.slidesCache).forEach((u) => { const d = S.slidesCache[u]; if (/&native=1$/.test(u) && d && d.pending) delete S.slidesCache[u]; });
   hydrateThumbs();
-  if (S.live.kind === 'deck' && S.live.native && S.live.slotId) projDeck(S.live.slotId, S.live.i, S.live.b);
+  if (!waiting) return;
+  // si riproietta una volta sola, e solo se la stessa presentazione è ancora in onda e ora è pronta davvero
+  const L = S.live, d = await getSlides(L.file, true);
+  if (d && d.native && S.live.kind === 'deck' && S.live.file === L.file) projDeck(L.slotId, S.live.i, S.live.b);
 }
 const hymnEdit = (p) => (S.settings.hymn_edits || {})[p] || null;
 const thumb = (data, i, edit, extra = '') => `<div class="slide pp" style="aspect-ratio:${data.ratio}" ${extra}>${slideHTML(data.slides[i], i, edit)}</div>`;
@@ -822,13 +829,23 @@ function detGeneric(sl) {
 }
 
 /* ── Inni ───────────────────────────────────────────────────────────────── */
-const snip = (t, q, n = 60) => { const i = t.toLowerCase().indexOf(q); if (i < 0) return esc(t.slice(0, 110)); const st = Math.max(0, i - 40);
-  return (st ? '…' : '') + esc(t.slice(st, i)) + '<mark>' + esc(t.slice(i, i + q.length)) + '</mark>' + esc(t.slice(i + q.length, i + q.length + n)) + '…'; };
-const markQ = (t, q) => { const i = q ? t.toLowerCase().indexOf(q) : -1; return i < 0 ? esc(t) : esc(t.slice(0, i)) + '<mark>' + esc(t.slice(i, i + q.length)) + '</mark>' + esc(t.slice(i + q.length)); };
+// dove sta la parola cercata nel testo originale, ignorando accenti e apostrofi: [inizio, fine] oppure null
+const findQ = (t, q) => { if (!q) return null; let f = ''; const at = [];
+  for (let k = 0; k < t.length; k++) { const c = fold(t[k]); for (let j = 0; j < c.length; j++) at.push(k); f += c; }
+  const j = f.indexOf(q); return j < 0 ? null : [at[j], at[j + q.length - 1] + 1]; };
+const snip = (t, q, n = 60) => { const m = findQ(t, q); if (!m) return esc(t.slice(0, 110)); const [i, e] = m, st = Math.max(0, i - 40);
+  return (st ? '…' : '') + esc(t.slice(st, i)) + '<mark>' + esc(t.slice(i, e)) + '</mark>' + esc(t.slice(e, e + n)) + '…'; };
+const markQ = (t, q) => { const m = findQ(t, q); return !m ? esc(t) : esc(t.slice(0, m[0])) + '<mark>' + esc(t.slice(m[0], m[1])) + '</mark>' + esc(t.slice(m[1])); };
 let textT = 0;
+// per cercare: minuscole, senza accenti, apostrofi uguali («Gesù» = «gesu»)
+const fold = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[’‘]/g, "'");
 function hymnListHtml() {
-  const q = S.hymnQ.toLowerCase().trim();
+  const q = fold(S.hymnQ).trim();
+  // prima il numero, poi i titoli (che iniziano con la parola, poi che la contengono), infine gli inni che la hanno nel testo
+  const rank = (h) => { const t = h._tt || fold(h.title);
+    return q === h.number || q === h.number.replace(/^0+/, '') ? 0 : t.startsWith(q) ? 1 : (' ' + t).includes(' ' + q) ? 2 : h._k.includes(q) ? 3 : 4; };
   let list = S.hymns.map((h, i) => [h, i]).filter(([h]) => (!S.baseOnly || h.audio) && (!q || h._k.includes(q) || (q.length > 2 && h._t.includes(q))));
+  if (q) list = list.map(([h, i]) => [h, i, rank(h)]).sort((a, b) => a[2] - b[2] || a[1] - b[1]).map(([h, i]) => [h, i]);
   if (REMOTE && q.length > 2) {   // telefono: le parole del testo le cerca il Mac
     const hits = S.textHits && S.textHits.q === q + S.hymnsDb ? S.textHits.list : null;
     if (hits) { const seen = new Set(list.map(([h]) => h.path)); hits.forEach((x) => { const i = S.hymns.findIndex((h) => h.path === x.path); if (i >= 0 && !seen.has(x.path) && (!S.baseOnly || x.audio)) { S.hymns[i].slides = x.slides; list.push([S.hymns[i], i]); } }); }

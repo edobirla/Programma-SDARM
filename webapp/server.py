@@ -47,7 +47,7 @@ from pptx import Presentation              # noqa: E402
 STATIC = os.path.join(ROOT, "webapp", "static")
 ASSETS = os.path.join(ROOT, "assets")
 PORT = int(os.environ.get("SDARM_PORT") or os.environ.get("PORT") or "8765")
-VERSION = "2.0.10"
+VERSION = "2.0.11"
 # identifica questa copia dell'app: l'avvio spegne i motori di versioni precedenti
 BUILD = str(int(os.path.getmtime(sys.executable if FROZEN else os.path.abspath(__file__))))
 AUDIO_EXT = (".mp3", ".m4a", ".wav", ".ogg", ".aac", ".flac")
@@ -165,21 +165,41 @@ def close_outputs():
     subprocess.run(["pkill", "-f", "user-data-dir=" + os.path.join(DATA, "cache", "chrome", "uscita-")], check=False)
 
 
+def fold(t):
+    """Per cercare: minuscole, senza accenti, apostrofi uguali («Gesù» = «gesu»)."""
+    import unicodedata
+    t = unicodedata.normalize("NFKD", t.lower()).replace("’", "'").replace("‘", "'")
+    return "".join(c for c in t if not unicodedata.combining(c))
+
+
 def search_hymns(q, limit=8, only=""):
     """Tutti gli innari, non solo quello scelto: prima i titoli, poi i testi."""
-    q = q.lower().strip()
-    title, text = [], []
+    q = fold(q).strip()
+    found = []
     for db in ([only] if only else settings.get("databases", [])):
         if not os.path.isdir(R(db)):
             continue
         name = os.path.basename(R(db).rstrip("/"))
         for h in hymns_for(db):
-            row = dict(h, db=db, dbname=name)
-            if q in (h["number"] + " " + h["title"]).lower():
-                title.append(row)
-            elif len(q) > 2 and q in " ".join(h["slides"]).lower():
-                text.append(row)
-    return (title[:limit // 2 + 2] + text)[:limit]
+            r = hymn_rank(h, q)
+            if r is not None:
+                found.append((r, len(found), dict(h, db=db, dbname=name)))
+    return [row for _, _, row in sorted(found)][:limit]
+
+
+def hymn_rank(h, q):
+    """Prima il numero, poi i titoli (quelli che iniziano con la parola, poi quelli
+    che la contengono), solo dopo gli inni che la hanno nel testo. None = non c'entra."""
+    t = fold(h["title"])
+    if q == h["number"].lstrip("0") or q == h["number"]:
+        return 0
+    if t.startswith(q) or (" " + q) in (" " + t):
+        return 1 if t.startswith(q) else 2
+    if q in (h["number"] + " " + t):
+        return 3
+    if len(q) > 2 and q in fold(" ".join(h["slides"])):
+        return 4
+    return None
 
 
 # ── caratteri caricati nell'app (es. Berlin Sans FB copiato da Windows) ────
@@ -335,11 +355,13 @@ def native_slides(path, base):
 
         def job():
             try:
-                pptx_render.keynote_slides(path, SLIDES, base)
+                if not pptx_render.keynote_slides(path, SLIDES, base):
+                    raise RuntimeError("Keynote non ha prodotto le diapositive")
                 NATIVE.pop(path, None)
-                send_all({"sync": "slides", "p": path})
+                send_all({"sync": "slides", "p": path})          # solo quando le diapositive ci sono davvero
             except Exception as ex:          # niente Keynote o file che non apre: resta il disegno dell'app
                 NATIVE[path] = str(ex)[:200]
+                send_all({"natErr": NATIVE[path]})
         threading.Thread(target=job, daemon=True).start()
         st = "in corso"
     return dict(base, pending=st == "in corso", native_error=None if st == "in corso" else st)
