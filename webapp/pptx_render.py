@@ -23,7 +23,7 @@ P = "{http://schemas.openxmlformats.org/presentationml/2006/main}"
 R = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
 MC = "{http://schemas.openxmlformats.org/markup-compatibility/2006}"
 R_EMBED = R + "embed"
-CACHE_VERSION = 7
+CACHE_VERSION = 8
 
 COLOR_TAGS = {A + t for t in ("srgbClr", "schemeClr", "sysClr", "prstClr", "scrgbClr", "hslClr")}
 PRESET = {"black": "000000", "white": "FFFFFF", "red": "FF0000", "green": "008000", "blue": "0000FF", "yellow": "FFFF00",
@@ -78,11 +78,23 @@ class Deck:
         self.prs, self.out_dir, self.key = prs, out_dir, key
         self.W, self.H = prs.slide_width, prs.slide_height
         self.n = 0
-        master = prs.slide_master
-        theme = None
+        self._master = None
+        self.use_master(prs.slide_master)
+        dts = prs.part._element.find(f"{P}defaultTextStyle") if hasattr(prs.part, "_element") else None
+        self.default_style = dts if dts is not None else prs.element.find(f"{P}defaultTextStyle")
+
+    def use_master(self, master):
+        """Ogni schema ha il suo tema (colori, caratteri, sfondi): una presentazione può averne più d'uno."""
+        if master.part.partname != self._master:
+            self._master = master.part.partname
+            self._load_theme(master)
+
+    def _load_theme(self, master):
+        theme = self.theme_part = None
         for rel in master.part.rels.values():
             if rel.reltype.endswith("/theme"):
                 from lxml import etree
+                self.theme_part = rel.target_part
                 theme = etree.fromstring(rel.target_part.blob)
         self.scheme, self.fonts, self.fills, self.lines, self.bgfills = {}, ("", ""), [], [], []
         if theme is not None:
@@ -98,8 +110,6 @@ class Deck:
                 setattr(self, attr, [k for k in lst if isinstance(k.tag, str)] if lst is not None else [])
         cm = master.element.find(f"{P}clrMap")
         self.master_map = dict(cm.attrib) if cm is not None else {}
-        dts = prs.part._element.find(f"{P}defaultTextStyle") if hasattr(prs.part, "_element") else None
-        self.default_style = dts if dts is not None else prs.element.find(f"{P}defaultTextStyle")
 
     def uid(self):
         self.n += 1
@@ -263,7 +273,7 @@ def fill_of(deck, sppr, style, cmap, part, group_fill=None):
     if style is not None:
         r = deck.style_fill(style.find(f"{A}fillRef"), cmap, deck.fills)
         if r:
-            return deck.paint(r[0], cmap, part, r[1])
+            return deck.paint(r[0], cmap, deck.theme_part, r[1])
     return None
 
 
@@ -806,7 +816,7 @@ def _bg(deck, cs, cmap, part):
         return True, deck.paint(k, cmap, part) if k is not None else None
     if ref is not None:
         r = deck.style_fill(ref, cmap, deck.fills)
-        return True, deck.paint(r[0], cmap, part, r[1]) if r else None
+        return True, deck.paint(r[0], cmap, deck.theme_part, r[1]) if r else None
     return False, None
 
 
@@ -1066,6 +1076,7 @@ def describe(path, cache_root):
     for slide in prs.slides:
         layout = slide.slide_layout
         master = layout.slide_master
+        deck.use_master(master)
         cmap = dict(deck.master_map)
         for el in (layout.element, slide.element):
             ov = el.find(f"{P}clrMapOvr/{A}overrideClrMapping")
@@ -1218,8 +1229,9 @@ def derive_template(folder, cache_root):
             for s in sl:
                 if "text" in s and s["text"]["paras"] and s["text"]["paras"][0]["runs"]:
                     r = s["text"]["paras"][0]["runs"][0]
+                    fills = [x["fill"] for x in sl if x.get("fill") and x["w"] > 0.9 and x["h"] > 0.9]
                     return {"bg": bg, "font": r["f"] or "Helvetica", "color": r["c"] or "#FFFFFF",
-                            "size": round(r["s"] * 7.5 * 72), "fill": next((x.get("fill") for x in sl if x.get("fill")), "#000000")}
+                            "size": round(r["s"] * 7.5 * 72), "fill": fills[-1] if fills else "#000000"}
     return {"bg": "", "font": "Helvetica", "color": "#FFFFFF", "size": 60, "fill": "#000000"}
 
 
@@ -1271,13 +1283,14 @@ def layout(stanzas):
 def apply_edits(src, dest, edit):
     """Copia dell'inno con le modifiche fatte nell'app scritte dentro il file:
     tutto il resto (sfondi, immagini, «Amen!», caratteri) resta com'era.
-    edit = {scale, texts: {indice: "testo" | [[{t, i, b, c}, …], …]}} — lo
+    edit = {scale, scales: {indice: k}, texts: {indice: "testo" | [[{t, i, b, c}, …], …]}} — lo
     stesso riquadro che modifica l'app (quello con più pezzi di testo)."""
     from copy import deepcopy
     from lxml import etree
     prs = Presentation(src)
-    scale, texts = edit.get("scale") or 1, edit.get("texts") or {}
+    scales, texts = edit.get("scales") or {}, edit.get("texts") or {}
     for k, slide in enumerate(prs.slides):
+        scale = scales.get(str(k)) or edit.get("scale") or 1
         boxes = [sh for sh in slide.shapes if sh.left is not None and sh.width is not None
                  and sh.has_text_frame and sh.text_frame.text.strip()]
         lines = texts.get(str(k))
@@ -1311,7 +1324,7 @@ def apply_edits(src, dest, edit):
                         ln = rpr.find(f"{A}ln")
                         rpr.insert(list(rpr).index(ln) + 1 if ln is not None else 0, fill)
                     etree.SubElement(r, f"{A}t").text = run["t"]
-        if scale != 1:   # «Dimensione del testo»: vale per tutti i testi, come nell'app
+        if scale != 1:   # «Dimensione del testo»: vale per i testi di questa diapositiva, come nell'app
             for sh in boxes:
                 for r in sh._element.iter(f"{A}rPr"):
                     r.set("sz", str(round(int(r.get("sz") or 1800) * scale)))

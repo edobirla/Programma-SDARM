@@ -79,13 +79,13 @@ window.boxesOf = (prof, name) => {
 /* Disegna una diapositiva PowerPoint descritta dal motore (pptx_render).
    Il contenitore deve avere container-type: size: le dimensioni dei testi
    sono in cqh (frazioni dell'altezza), le posizioni in %. `edit` applica le
-   modifiche fatte nell'app: {scale, texts: {indice: "testo"}}. */
+   modifiche fatte nell'app: {scale, scales: {indice: k}, texts: {indice: "testo"}}. */
 /* il riquadro col testo dell'inno: quello con più pezzi di testo (non quelli di schema e layout) */
 window.mainBox = (slide) => { let best = -1, main = -1; slide.forEach((s, i) => { const n = s.text && !s.m ? s.text.paras.reduce((a, p) => a + p.runs.length, 0) : 0; if (n > best) { best = n; main = i; } }); return main; };
 const SLIDE_IMG = '/media?p=' + encodeURIComponent('@/cache/slides/');
 window.slideHTML = (slide, idx, edit) => {
   const e = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  const scale = (edit && edit.scale) || 1;
+  const scale = (edit && ((edit.scales && edit.scales[idx]) || edit.scale)) || 1;   // ogni diapositiva ha la sua dimensione
   const override = edit && edit.texts && edit.texts[idx] != null ? edit.texts[idx] : null;
   const main = override != null ? window.mainBox(slide) : -1;
   // modifiche ai singoli riquadri (presentazioni e PDF): {"diapositiva.forma": {lines, f, k, c, a, b}}

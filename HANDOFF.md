@@ -12,13 +12,12 @@
 > v1 = old customtkinter desktop app on `main` (Windows build, still installed in church, gets nothing from v2).
 > v2 = this webapp-style Mac app. Everything below is committed on branch `webapp` (last commit 9c9c132).
 
-### ▶ Repository (done 2026-10-21)
-v2 now lives in its own PUBLIC repo **edobirla/Programma-SDARM** (fresh history, branch `main`). Develop here, not on the
-old repo's `webapp` branch. `REPO` in `webapp/server.py` points here. Release = bump `VERSION`, `git tag -a v2.x -m "notes"`,
-push the tag → `build-mac.yml` builds and publishes `Programma-SDARM-<ver>-mac.zip`. Never commit `.claude/launch.json`.
-Not in the repo (stay on the old Mac): `PROMPT lezioni e grafiche.md`, `grafiche lezione/`, `lezionario_T4_2026.json`, `logo bianco.png`.
-Latest changes: question reference is its own box («Riferimento» in Grafiche › Domanda, movable/resizable, own max size);
-paused timer freezes on the projector (`paused` field in live state; `timerLive()` in app.js), ± while paused adds to remaining.
+### Publishing (state at 2026-11-06, v2.0.12)
+v2 is public in `edobirla/Programma-SDARM` (own history, branch `main`); this checkout's `origin` is still the v1 repo.
+To release: bump `VERSION` in `webapp/server.py`, commit on `webapp` here, copy `webapp/` and `core/` into a clone of the public
+repo (not the local `file test/`, `.claude/launch.json`), commit, `git tag -a v2.x.y -m "notes shown in the app"`, push branch and tag;
+the workflow builds and publishes the Release. Firebase hosting (`webapp/firebase/deploy.sh`) only with the user's explicit OK.
+Quick self-check: `python3 webapp/test_fixes.py`.
 
 ### Architecture
 - `webapp/app_main.py` — launcher (the .app entry). Kills stale engines of older builds (port scan 8765+, `X-SDARM-Build`

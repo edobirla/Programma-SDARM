@@ -519,15 +519,18 @@ function heRead(root) {
   walk(root); if (cur) end();
   return lines;
 }
+const heEdit = () => ({ scale: S.he.scale, scales: S.he.scales, texts: S.he.texts });
+const heScaleNow = () => S.he.scales[S.he.i] ?? S.he.scale;
 function heShow() {
-  const he = S.he, i = he.i, edit = { scale: he.scale, texts: he.texts };
+  const he = S.he, i = he.i, edit = heEdit();
+  $('#heScale').value = Math.round(heScaleNow() * 100); $('#heScaleV').textContent = $('#heScale').value + '%';
   $$('#heThumbs [data-i]').forEach((b) => b.classList.toggle('live', +b.dataset.i === i));
   $('#hePrev').innerHTML = thumb(he.data, i, edit);
   $('#heText').innerHTML = heLinesHtml(heLines(i));
   $('#heDelBtn').textContent = he.confirm === i ? 'Sicuro? Tocca di nuovo' : 'Elimina questa diapositiva';
 }
 function renderHymnEditor() {
-  const he = S.he, data = he.data, edit = { scale: he.scale, texts: he.texts };
+  const he = S.he, data = he.data, edit = heEdit();
   modal(`<div style="display:flex;align-items:baseline;gap:10px"><span style="font-size:19px;font-weight:750;flex:1">Modifica inno</span><span style="color:var(--faint);font-size:12px">Il file PowerPoint originale non viene toccato</span></div>
     <div style="display:flex;gap:16px;min-height:0">
       <div class="scr" id="heThumbs" style="width:170px;flex-shrink:0;display:flex;flex-direction:column;gap:8px;max-height:60vh">${data.slides.map((_, k) => `<button class="slide-btn" data-a="heSlide" data-i="${k}">${thumb(data, k, edit)}</button>`).join('')}</div>
@@ -537,7 +540,7 @@ function renderHymnEditor() {
           <button class="btn sm" data-a="heFmt" data-v="bold" style="font-weight:800;width:38px" title="Grassetto (⌘B)">B</button>
           <span style="font-size:12px;color:var(--faint)">Seleziona le parole e tocca un tasto. Va a capo con Invio.</span></div>
         <div class="field" id="heText" contenteditable="true" spellcheck="false" style="height:150px;overflow:auto;padding:12px;line-height:1.5;font-size:15px;font-weight:400;font-style:normal;background:#1c1e2a;color:#fff;text-align:center"></div>
-        <label style="display:flex;align-items:center;gap:12px;font-weight:650;font-size:13px">Dimensione del testo<input type="range" id="heScale" min="50" max="160" value="${Math.round(he.scale * 100)}" style="flex:1"><span id="heScaleV" style="width:44px;text-align:right;color:var(--sub)">${Math.round(he.scale * 100)}%</span></label>
+        <label style="display:flex;align-items:center;gap:12px;font-weight:650;font-size:13px">Dimensione del testo di questa diapositiva<input type="range" id="heScale" min="50" max="160" value="100" style="flex:1"><span id="heScaleV" style="width:44px;text-align:right;color:var(--sub)">100%</span><button type="button" class="btn sm" data-a="heScaleAll">Applica a tutte</button></label>
       </div></div>
     <div style="display:flex;gap:8px"><button class="btn" data-a="heReset">Ripristina l'originale</button>
       <button class="btn danger" data-a="heDel" id="heDelBtn"></button><span style="flex:1"></span><button class="btn" data-a="closeModal">Annulla</button><button class="btn pri" data-a="heSave">Salva</button></div>`, 940);
@@ -547,9 +550,9 @@ function renderHymnEditor() {
 document.addEventListener('mousedown', (e) => { if (e.target.closest('[data-a="heFmt"]')) e.preventDefault(); });
 document.addEventListener('input', (e) => {
   if (!S.he) return;
-  const he = S.he, edit = { scale: he.scale, texts: he.texts };
+  const he = S.he, edit = heEdit();
   if (e.target.id === 'heText') he.texts[he.i] = heRead(e.target);
-  else if (e.target.id === 'heScale') { he.scale = e.target.value / 100; $('#heScaleV').textContent = e.target.value + '%'; } else return;
+  else if (e.target.id === 'heScale') { he.scales[he.i] = e.target.value / 100; $('#heScaleV').textContent = e.target.value + '%'; } else return;
   $('#hePrev').innerHTML = thumb(he.data, he.i, edit);
   const t = $(`#heThumbs [data-i="${he.i}"]`); if (t) t.innerHTML = thumb(he.data, he.i, edit);
 });
@@ -746,6 +749,9 @@ function detLezione() {
     ${q.note ? `<div class="soft"><div style="display:flex;align-items:center"><b style="flex:1;color:var(--sub)">Nota</b><button class="btn sm" data-a="projNota">Proietta</button></div>
       <div style="color:var(--sub);font-style:italic;margin-top:6px">${esc(q.note.length > 420 ? q.note.slice(0, 420) + '…' : q.note)}</div></div>` : ''}`;
 }
+// «9:30», «9.30», «930», «9» -> "09:30"; null se non è un'ora
+const parseHM = (s) => { const m = /^\s*(\d{1,2})(?:[:.,\s]?(\d{2}))?\s*$/.exec(s || ''); if (!m || +m[1] > 23 || +(m[2] || 0) > 59) return null;
+  return m[1].padStart(2, '0') + ':' + (m[2] || '00'); };
 function detTimer() {
   const T = S.timer;
   return `<div style="display:flex;flex-direction:column;gap:18px;align-items:center">
@@ -755,7 +761,7 @@ function detTimer() {
     <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center">${[5, 10, 15, 20].map((m) => `<button class="btn sm" data-a="tSet" data-m="${m}">${m} min</button>`).join('')}</div>
     <div class="card" style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;justify-content:center;width:100%;max-width:560px;padding:18px">
       <span style="font-weight:700;font-size:17px">Oppure fino alle</span>
-      <input type="time" id="tUntil" class="field" style="width:170px;height:58px;font-size:28px;font-weight:600;text-align:center;font-variant-numeric:tabular-nums" value="${esc(S.tUntilV || '')}">
+      <input id="tUntil" class="field" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="9:30" aria-label="Ora di fine del timer" style="width:170px;height:58px;font-size:28px;font-weight:600;text-align:center;font-variant-numeric:tabular-nums" value="${esc(S.tUntilV || '')}">
       <button class="btn pri" data-a="tUntilGo" style="height:50px;border-radius:25px;padding:0 22px;font-size:15px">Avvia fino a quest'ora</button></div>
     <button class="btn pri" data-a="tToggle" style="width:100%;max-width:460px;height:50px;border-radius:25px;font-size:15px">${T.running ? 'Pausa' : 'Avvia timer e proietta'}</button>
     <div style="width:100%;max-width:520px">${playerHtml('pm', pmTitle(), 'pm')}</div>
@@ -1498,7 +1504,7 @@ function renderSearch(qv) {
         return `<div class="soft sres" style="display:flex;align-items:center;gap:12px;padding:10px 12px;margin-bottom:4px"><div style="flex:1;min-width:0"><span class="label" style="color:#888dec">Inno${many ? ' · ' + esc(h.dbname) : ''}</span><div style="font-weight:650">${markQ(h.number + ' — ' + h.title, q)}</div>
           ${inT ? '' : `<div style="font-size:12.5px;color:var(--sub)">${snip(h.slides.join(' · '))}</div>`}</div>
           <button class="btn sm" data-a="addFromSearch" data-k="h" data-i="${i}">+ Scaletta</button><button class="btn sm pri" data-a="projFromSearch" data-k="h" data-i="${i}">Proietta</button></div>`; }).join('')}
-      ${vs.map((v) => `<div class="soft sres" style="display:flex;align-items:center;gap:12px;padding:10px 12px;margin-bottom:4px"><div style="flex:1;min-width:0"><span class="label" style="color:#de7949">Versetto</span><div style="font-weight:650">${esc(v.name + ' ' + v.ch + ':' + v.v)}</div>
+      ${vs.map((v) => `<div class="soft sres" data-a="openFromSearch" data-b="${v.book}" data-c="${v.ch}" data-v="${v.v}" title="Apri nella Bibbia" style="display:flex;align-items:center;gap:12px;padding:10px 12px;margin-bottom:4px"><div style="flex:1;min-width:0"><span class="label" style="color:#de7949">Versetto</span><div style="font-weight:650">${esc(v.name + ' ' + v.ch + ':' + v.v)}</div>
           <div style="font-size:12.5px;color:var(--sub)">${snip(v.text)}</div></div>
           <button class="btn sm" data-a="addFromSearch" data-k="v" data-b="${v.book}" data-c="${v.ch}" data-v="${v.v}">+ Scaletta</button><button class="btn sm pri" data-a="projFromSearch" data-k="v" data-b="${v.book}" data-c="${v.ch}" data-v="${v.v}">Proietta</button></div>`).join('')}
       ${hy.length + vs.length ? '' : '<div style="padding:10px;color:var(--sub)">Nessun risultato</div>'}`;
@@ -1668,7 +1674,7 @@ function setupKeys() {
   document.addEventListener('keydown', (e) => {
     const typing = /INPUT|TEXTAREA/.test(document.activeElement.tagName);
     if (e.key === 'Escape') { if ($('#modal').innerHTML) return closeModal(); if (typing) return document.activeElement.blur(); closePops(); return stopLive(); }
-    if (typing) { if (e.key === 'Enter' && document.activeElement.dataset.edit && document.activeElement.dataset.edit.startsWith('sec')) document.activeElement.blur(); return; }
+    if (typing) { if (e.key === 'Enter' && document.activeElement.id === 'tUntil') return act.tUntilGo(); if (e.key === 'Enter' && document.activeElement.dataset.edit && document.activeElement.dataset.edit.startsWith('sec')) document.activeElement.blur(); return; }
     if (['ArrowRight', 'PageDown'].includes(e.key)) { e.preventDefault(); step(1); }
     if (['ArrowLeft', 'PageUp'].includes(e.key)) { e.preventDefault(); step(-1); }
     if (e.ctrlKey && ['1', '2', '3'].includes(e.key)) { e.preventDefault(); act.overlay(null, { v: ['nero', 'sfondo', 'congela'][+e.key - 1] }); }
@@ -1819,7 +1825,7 @@ const act = {
   editHymn: async (el, d) => {
     const data = await getSlides(d.p); if (!data) return toast('Questo PowerPoint non si legge');
     const ed = hymnEdit(d.p) || {};
-    S.he = { path: d.p, data, i: Math.min(1, data.slides.length - 1), texts: Object.assign({}, ed.texts || {}), scale: ed.scale || 1 };
+    S.he = { path: d.p, data, i: Math.min(1, data.slides.length - 1), texts: Object.assign({}, ed.texts || {}), scale: ed.scale || 1, scales: Object.assign({}, ed.scales || {}) };
     renderHymnEditor();
   },
   heSlide: (el, d) => { S.he.i = +d.i; S.he.confirm = -1; heShow(); },
@@ -1836,30 +1842,32 @@ const act = {
   deSave: async () => { const de = S.de, ed = Object.assign({}, S.settings.hymn_edits || {});
     const boxes = {}; Object.entries(de.boxes).forEach(([k, v]) => { if (Object.keys(v).length) boxes[k] = v; });
     const next = Object.assign({}, de.base, Object.keys(boxes).length ? { boxes } : {});
-    if (!Object.keys(next).length || (!next.boxes && !Object.keys(next.texts || {}).length && (next.scale || 1) === 1)) delete ed[de.path]; else ed[de.path] = next;
+    if (!Object.keys(next).length || (!next.boxes && !Object.keys(next.texts || {}).length && (next.scale || 1) === 1 && !Object.keys(next.scales || {}).length)) delete ed[de.path]; else ed[de.path] = next;
     await setSetting('hymn_edits', ed); S.de = null; closeModal(); toast('Salvato · il file originale resta com\'era');
     if (S.live.kind === 'deck' && S.live.file === de.path) projDeck(S.live.slotId, S.live.i);
     renderMain(); },
-  heFmt: (el, d) => { const t = $('#heText'); t.focus(); document.execCommand(d.v); S.he.texts[S.he.i] = heRead(t); $('#hePrev').innerHTML = thumb(S.he.data, S.he.i, { scale: S.he.scale, texts: S.he.texts }); },
+  heFmt: (el, d) => { const t = $('#heText'); t.focus(); document.execCommand(d.v); S.he.texts[S.he.i] = heRead(t); $('#hePrev').innerHTML = thumb(S.he.data, S.he.i, heEdit()); },
+  heScaleAll: () => { S.he.scale = heScaleNow(); S.he.scales = {}; renderHymnEditor(); },
   heDel: async () => { const he = S.he, i = he.i;
     if (he.data.slides.length < 2) return toast('Un inno deve avere almeno una diapositiva');
     if (he.confirm !== i) { he.confirm = i; return heShow(); }
     const r = await api.post('/api/hymn/slide-delete', { path: he.path, index: i }); if (!r.ok) return toast('Non sono riuscito a eliminarla');
     delete S.slidesCache[slidesUrl(he.path)]; const data = await getSlides(he.path); if (!data) return closeModal();
-    const t = {}; Object.entries(he.texts).forEach(([k, v]) => { k = +k; if (k !== i) t[k - (k > i)] = v; });
+    const shift = (o) => { const t = {}; Object.entries(o).forEach(([k, v]) => { k = +k; if (k !== i) t[k - (k > i)] = v; }); return t; };
     const eds = Object.assign({}, S.settings.hymn_edits || {}); if (r.edit) eds[he.path] = r.edit; S.settings.hymn_edits = eds;
-    Object.assign(he, { data, texts: t, i: Math.min(i, data.slides.length - 1), confirm: -1 }); renderHymnEditor(); renderMain(); toast('Diapositiva eliminata'); },
+    Object.assign(he, { data, texts: shift(he.texts), scales: shift(he.scales), i: Math.min(i, data.slides.length - 1), confirm: -1 }); renderHymnEditor(); renderMain(); toast('Diapositiva eliminata'); },
   delHymn: async (el, d) => {
     if (S.delHymn !== d.p) { S.delHymn = d.p; $('#hymnPrev').innerHTML = hymnPrevHtml(); return; }
     const r = await api.post('/api/hymn/delete', { path: d.p }); S.delHymn = null; if (!r.ok) return toast('Non sono riuscito a eliminarlo');
     await loadHymns(true); S.hymnSel = Math.min(S.hymnSel, S.hymns.length - 1); renderMain(); toast('Inno spostato nel Cestino'); },
   heSave: async () => { const ed = Object.assign({}, S.settings.hymn_edits || {}); const he = S.he;
     const texts = {}; Object.entries(he.texts).forEach(([k, v]) => { if (Array.isArray(v) || v !== he.data.text[k]) texts[k] = v; });
-    if (!Object.keys(texts).length && he.scale === 1) delete ed[he.path]; else ed[he.path] = { scale: he.scale, texts };
+    const scales = {}; Object.entries(he.scales).forEach(([k, v]) => { if (v !== he.scale) scales[k] = v; });
+    if (!Object.keys(texts).length && he.scale === 1 && !Object.keys(scales).length) delete ed[he.path]; else ed[he.path] = { scale: he.scale, scales, texts };
     await setSetting('hymn_edits', ed); closeModal(); toast('Inno salvato · il file originale resta com\'era');
     if (S.live.kind === 'hymn' && S.live.file === he.path) setLive(Object.assign({}, S.live, { edit: ed[he.path] || null }), true);
     renderMain(); },
-  heReset: () => { S.he.texts = {}; S.he.scale = 1; renderHymnEditor(); },
+  heReset: () => { S.he.texts = {}; S.he.scale = 1; S.he.scales = {}; renderHymnEditor(); },
   importHymn: () => { S.dbMenu = false; S.importSrc = '';
     const nextNum = String(Math.max(0, ...S.hymns.map((h) => parseInt(h.number, 10) || 0)) + 1).padStart(3, '0');
     const lab = 'display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:650;color:var(--sub)';
@@ -1890,7 +1898,7 @@ const act = {
     const r = await api.post('/api/hymn/export', { db: S.hymnsDb, only: d.only ? h.path : '' });
     if (r.ok) toast(r.count + (r.count === 1 ? ' inno esportato' : ' inni esportati') + (r.fonts ? ' · con il carattere dentro il file' : ' · carattere non incluso: caricalo in Impostazioni › Innari')); },
   // bibbia
-  bibLang: (el, d) => { setSetting('bible_primary_lang', d.v); renderMain(); loadBooks(); toast('Lingua della Bibbia: ' + el.textContent); },
+  bibLang: (el, d) => { setSetting('bible_primary_lang', d.v).then(loadLesson); renderMain(); loadBooks(); toast('Lingua della Bibbia: ' + el.textContent); },
   // la selezione scorre come nella barra in alto; cambia solo l'elenco dei libri
   testament: (el, d) => { if (S.bib.testament === d.v) return; S.bib.testament = d.v; const seg = el.closest('.seg2');
     seg.dataset.on = d.v === 'NT' ? 1 : 0; $$('button', seg).forEach((b) => b.classList.toggle('on', b === el));
@@ -1907,6 +1915,7 @@ const act = {
   projSlotVerse: (el, d) => { const [, sl] = findSlot(d.id); const v = sl.data.verse; projVerseRef(v.book, v.chapter, v.verse, v.langs, d.id); },
   liveLang: (el, d) => { const L = S.live; let ls = (L.langs || [lang()]).slice(); ls = ls.includes(d.v) ? (ls.length > 1 ? ls.filter((x) => x !== d.v) : ls) : ls.concat([d.v]); projVerseRef(L.book, L.chapter, L.verse, ls, L.slotId); },
   // ricerca
+  openFromSearch: (el, d) => { closePops(); clearSearch(); if (REMOTE) S.bibStep = 2; act.openVerse(el, d); },
   projFromSearch: (el, d) => { closePops(); clearSearch(); if (d.k === 'h') { const h = S.searchHy[+d.i]; projHymn({ number: h.number, title: h.title, path: h.path, slides_text: h.slides, audio_path: h.audio }, 0, null); } else projVerseRef(+d.b, +d.c, +d.v); },
   addFromSearch: async (el, d) => { closePops(); clearSearch(); askWhere(d.k === 'h' ? hymnSlot(S.searchHy[+d.i]) : await verseSlot(+d.b, +d.c, +d.v)); },
   // preghiere
@@ -1945,7 +1954,7 @@ const act = {
   // timer
   tAdj: (el, d) => { const T = S.timer; if (T.running) T.endAt += +d.d * 1000; else { T.total = T.remaining = Math.max(60, T.remaining + +d.d); } timerTick(); timerLive(); },
   tSet: (el, d) => { const T = S.timer; T.total = T.remaining = +d.m * 60; T.running = false; timerLive(); renderMain(); },
-  tUntilGo: () => { const v = $('#tUntil').value; if (!v) return toast('Scegli un\'ora'); S.tUntilV = v; act.tUntil(null, { v }); },
+  tUntilGo: () => { const v = parseHM($('#tUntil').value); if (!v) return toast('Scrivi l\'ora così: 9:30'); S.tUntilV = v; act.tUntil(null, { v }); },
   tUntil: (el, d) => { const T = S.timer, [h, m] = String(d.v).split(':').map(Number), t = new Date(); t.setHours(h, m, 0, 0);
     const secs = Math.round((t - Date.now()) / 1000); if (secs <= 0) return toast('Quell\'ora è già passata');
     T.running = false; T.total = T.remaining = secs; act.tToggle(); },

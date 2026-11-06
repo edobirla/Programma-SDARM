@@ -47,7 +47,7 @@ from pptx import Presentation              # noqa: E402
 STATIC = os.path.join(ROOT, "webapp", "static")
 ASSETS = os.path.join(ROOT, "assets")
 PORT = int(os.environ.get("SDARM_PORT") or os.environ.get("PORT") or "8765")
-VERSION = "2.0.11"
+VERSION = "2.0.12"
 # identifica questa copia dell'app: l'avvio spegne i motori di versioni precedenti
 BUILD = str(int(os.path.getmtime(sys.executable if FROZEN else os.path.abspath(__file__))))
 AUDIO_EXT = (".mp3", ".m4a", ".wav", ".ogg", ".aac", ".flac")
@@ -598,10 +598,14 @@ def lesson_payload():
         return out
     lang = settings.get("bible_primary_lang") or (bible.languages() or ["it"])[0]
     books = bible.books(lang)
+    # il lezionario è scritto in una lingua, la Bibbia può essere in un'altra: i numeri dei libri sono gli stessi
+    names = dict(books)
+    any_lang = [b for l in bible.languages() if l != lang for b in bible.books(l)] + books
     domande = lesson_mod.flatten_domande(les)
     for d in domande:
-        refs = bible_ref.parse_references(d["verses"], books) if books else []
+        refs = bible_ref.parse_references(d["verses"], any_lang) if books else []
         for r in refs:
+            r["book_name"] = names.get(r["book"], r["book_name"])
             r["texts"] = [bible.get_verse(lang, r["book"], r["chapter"], v) or "" for v in r["verses"]] \
                 if r["resolved"] else []
         d["refs"] = refs
@@ -1195,6 +1199,9 @@ class Handler(BaseHTTPRequestHandler):
             ed = (settings.get("hymn_edits") or {}).get(b["path"])
             if ed and ed.get("texts"):
                 ed["texts"] = {str(int(k) - (int(k) > i)): v for k, v in ed["texts"].items() if int(k) != i}
+            if ed and ed.get("scales"):
+                ed["scales"] = {str(int(k) - (int(k) > i)): v for k, v in ed["scales"].items() if int(k) != i}
+            if ed:
                 save_settings()
             _hymn_cache.clear()
             return self._json({"ok": True, "edit": ed})

@@ -34,12 +34,13 @@ class BibleVersion:
 
     def books(self) -> List[Tuple[int, str]]:
         rows = self._conn.execute(
-            "SELECT num, list_title FROM books ORDER BY position").fetchall()
+            # i versetti usano la posizione 1-66; `num` nella KJV ha il NT da 54
+            "SELECT position, list_title FROM books ORDER BY position").fetchall()
         return [(r[0], r[1]) for r in rows]
 
     def book_name(self, num: int) -> str:
         r = self._conn.execute(
-            "SELECT list_title FROM books WHERE num=?", (num,)).fetchone()
+            "SELECT list_title FROM books WHERE position=?", (num,)).fetchone()
         return r[0] if r else f"Libro {num}"
 
     def chapters(self, book: int) -> List[int]:

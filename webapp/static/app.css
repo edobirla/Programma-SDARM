@@ -275,6 +275,7 @@ html.phone .xbtn { display: none !important; }
 /* barra in alto sul telefono: niente vetro sfocato */
 html.phone .bar { background: transparent !important; box-shadow: none !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; border-color: transparent !important; }
 /* ricerca: testo sopra, pulsanti sotto */
+.sres[data-a]:hover { background: var(--fill2); }
 html.phone .sres { flex-direction: column; align-items: stretch !important; }
 html.phone .sres > .btn { flex: 1; }
 html.phone .sres { display: grid !important; grid-template-columns: 1fr 1fr; }
