@@ -100,9 +100,18 @@ def refs_in_another_language():
     assert r["resolved"] and r["book"] == 51 and r["verses"] == [1, 2, 3, 4, 5, 6], r
 
 
+def closing_title_is_not_a_verse():
+    src = os.path.join(tmp, "titolo.pptx")
+    prs = Presentation()
+    for text in ("Titolo\nSottotitolo", "Prima strofa", "Titolo"):
+        prs.slides.add_slide(prs.slide_layouts[6]).shapes.add_textbox(0, 0, 9000000, 3000000).text_frame.text = text
+    prs.save(src)
+    assert PR.read_blocks(src) == ["Titolo", "Prima strofa"], PR.read_blocks(src)
+
+
 if __name__ == "__main__":
     try:
-        for t in (theme_picture_background, hymnal_style_ignores_hidden_master_white, size_per_slide, refs_in_another_language):
+        for t in (theme_picture_background, hymnal_style_ignores_hidden_master_white, size_per_slide, refs_in_another_language, closing_title_is_not_a_verse):
             t()
             print("ok", t.__name__)
     finally:

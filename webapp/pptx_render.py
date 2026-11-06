@@ -1392,6 +1392,10 @@ def read_blocks(path):
             if out and t == out[0]:   # diapositiva finale col titolo, uguale alla prima
                 continue
             out.append(t)
+        # diapositiva finale = solo il titolo, mentre la prima ha anche un sottotitolo: non è una strofa
+        first = out[0].split("\n")[0].strip() if out else ""
+        if len(out) > 1 and first and out[-1].strip() == first:
+            out = [first] + out[1:-1]
         return out
     import sys as _s
     _s.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
