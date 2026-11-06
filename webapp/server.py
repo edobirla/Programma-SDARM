@@ -47,7 +47,7 @@ from pptx import Presentation              # noqa: E402
 STATIC = os.path.join(ROOT, "webapp", "static")
 ASSETS = os.path.join(ROOT, "assets")
 PORT = int(os.environ.get("SDARM_PORT") or os.environ.get("PORT") or "8765")
-VERSION = "2.0.13"
+VERSION = "2.0.14"
 # identifica questa copia dell'app: l'avvio spegne i motori di versioni precedenti
 BUILD = str(int(os.path.getmtime(sys.executable if FROZEN else os.path.abspath(__file__))))
 AUDIO_EXT = (".mp3", ".m4a", ".wav", ".ogg", ".aac", ".flac")
@@ -1175,7 +1175,7 @@ class Handler(BaseHTTPRequestHandler):
             if not src.lower().endswith(".pptx") or not os.path.isfile(src):
                 return self._json({"ok": False}, 400)
             try:   # Cestino di Finder: si può recuperare con «Rimetti a posto»
-                subprocess.run(["osascript", "-e", 'tell application "Finder" to delete POSIX file ' + json.dumps(src)],
+                subprocess.run(["osascript", "-e", 'tell application "Finder" to delete POSIX file ' + json.dumps(src, ensure_ascii=False)],
                                check=True, capture_output=True, timeout=20)
             except Exception:
                 return self._json({"ok": False, "error": "Il Mac non mi ha lasciato spostarlo nel Cestino"})
