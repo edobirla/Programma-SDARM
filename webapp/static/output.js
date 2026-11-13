@@ -346,6 +346,8 @@ let trail = [], trailT = 0;
 /* video: segue play/pausa/posizione del pannello; l'anteprima resta muta */
 function syncVideo(s) {
   const v = $('#content video'); if (!v) return;
+  // schermata di attesa: il video gira da solo, muto e in loop (prima veniva messo «in pausa» come un video normale)
+  if (s.kind === 'none') { v.muted = true; if (v.paused) v.play().catch(() => {}); return; }
   v.muted = PREVIEW;
   v.playbackRate = s.vrate || 1;
   const target = s.pos + (s.playing ? (Date.now() - s.at) / 1000 * (s.vrate || 1) : 0);

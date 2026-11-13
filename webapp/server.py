@@ -57,7 +57,7 @@ def hymn_links_default():
         return []
 ASSETS = os.path.join(ROOT, "assets")
 PORT = int(os.environ.get("SDARM_PORT") or os.environ.get("PORT") or "8765")
-VERSION = "2.0.16"
+VERSION = "2.0.17"
 # identifica questa copia dell'app: l'avvio spegne i motori di versioni precedenti
 BUILD = str(int(os.path.getmtime(sys.executable if FROZEN else os.path.abspath(__file__))))
 AUDIO_EXT = (".mp3", ".m4a", ".wav", ".ogg", ".aac", ".flac")
