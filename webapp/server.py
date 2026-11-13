@@ -45,9 +45,19 @@ import pptx_render                         # noqa: E402
 from pptx import Presentation              # noqa: E402
 
 STATIC = os.path.join(ROOT, "webapp", "static")
+
+
+def hymn_links_default():
+    """Inni corrispondenti tra innari (italiano, spagnolo, rumeno): la lista di base.
+    Se Edoardo la modifica nell'app, vale quella salvata in settings «hymn_links»."""
+    try:
+        with open(os.path.join(ROOT, "webapp", "hymn_links.json"), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return []
 ASSETS = os.path.join(ROOT, "assets")
 PORT = int(os.environ.get("SDARM_PORT") or os.environ.get("PORT") or "8765")
-VERSION = "2.0.14"
+VERSION = "2.0.15"
 # identifica questa copia dell'app: l'avvio spegne i motori di versioni precedenti
 BUILD = str(int(os.path.getmtime(sys.executable if FROZEN else os.path.abspath(__file__))))
 AUDIO_EXT = (".mp3", ".m4a", ".wav", ".ogg", ".aac", ".flac")
@@ -569,6 +579,44 @@ def audio_by_number(folder):
     return out
 
 
+# innari riconosciuti dal nome della cartella (come HYMNALS in app.js) e sigla mostrata
+HYMNAL_KEYS = [(r"avventist", "Innario avventista", "IT"), (r"riformist", "Nuovo innario riformista", "IT rif."),
+               (r"himn|espa[nñ]ol", "Himnario Adventista", "ES"), (r"cre[sşș]tine", "Imnuri Crestine", "RO"),
+               (r"az[sşș]mr", "Imnuri azsmr", "RO AZȘMR")]
+# basi cantate (con le voci): non si prestano agli inni delle altre lingue e mostrano un avviso
+SUNG_HYMNALS = {"Himnario Adventista"}
+
+
+def hymnal_key(folder):
+    name = os.path.basename(folder.rstrip("/"))
+    return next(((k, t) for pat, k, t in HYMNAL_KEYS if re.search(pat, name, re.I)), (name, name))
+
+
+def borrow_audio(folder, out):
+    """Inno senza base: si usa quella dell'inno corrispondente in un'altra lingua (stessa melodia)."""
+    key = hymnal_key(folder)[0]
+    links = settings.get("hymn_links") or hymn_links_default()
+    others = {}
+    for d in settings.get("databases", []):
+        if os.path.isdir(R(d)) and R(d) != folder:
+            k, t = hymnal_key(R(d))
+            others.setdefault(k, (R(d), t))
+    found = {}
+    for h in out:
+        h["audio_sung"] = bool(h["audio"]) and key in SUNG_HYMNALS
+        if h["audio"] or not h["number"].isdigit():
+            continue
+        g = next((g for g in links if g.get(key) == int(h["number"])), None)
+        for k, n in (g or {}).items():
+            if k == key or k not in others or k in SUNG_HYMNALS:
+                continue
+            d, tag = others[k]
+            a = found.setdefault(d, audio_by_number(d)).get(n)
+            if a:
+                h["audio"], h["audio_from"] = rel(a), f"{tag} {n}"
+                break
+
+
 def hymns_for(stored):
     folder = R(stored)
     if folder not in _hymn_cache:
@@ -578,6 +626,7 @@ def hymns_for(stored):
             a = (h.audio_path if h.audio_path and os.path.isfile(h.audio_path) else None) or (audio.get(int(h.number)) if h.number.isdigit() else None)
             out.append({"number": h.number, "title": h.title, "path": rel(h.file_path),
                         "audio": rel(a) if a else "", "slides": h.slides_text})
+        borrow_audio(folder, out)
         _hymn_cache[folder] = out
     return _hymn_cache[folder]
 
@@ -757,6 +806,7 @@ class Handler(BaseHTTPRequestHandler):
             "dbs": [{"path": d, "name": os.path.basename(R(d).rstrip("/")) or d, "exists": os.path.isdir(R(d))} for d in dbs],
             "langs": [{"code": c, "label": bible.language_label(c)} for c in bible.languages()],
             "live": live,
+            "hymn_links": hymn_links_default(),
         }
 
     def _loopback(self):
@@ -873,7 +923,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": False, "hymns": []})
             hy = hymns_for(folder)
             if q.get("lite"):            # telefono: solo numero, titolo e base (il testo si cerca sul Mac)
-                hy = [{k: h[k] for k in ("number", "title", "path", "audio")} for h in hy]
+                hy = [{k: h.get(k) for k in ("number", "title", "path", "audio", "audio_from", "audio_sung")} for h in hy]
             return self._json({"ok": True, "hymns": hy})
         if p == "/api/bible/books":
             return self._json(bible.books(q.get("lang", "it")))
@@ -1032,6 +1082,8 @@ class Handler(BaseHTTPRequestHandler):
                     settings[k] = v
             save_settings()
             self._sync("settings")
+            if "hymn_links" in data:      # le basi prese dagli inni collegati cambiano
+                _hymn_cache.clear()
             if "databases" in data:
                 _hymn_cache.clear()
                 # gli inni si leggono subito, in sottofondo: la prima apertura è già pronta

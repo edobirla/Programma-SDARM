@@ -11,14 +11,14 @@
   #stage { position: absolute; inset: 0; color: #fff; font-family: Helvetica, Arial, sans-serif; container-type: size; }
   .layer { position: absolute; inset: 0; }
   #content { transition: opacity .45s cubic-bezier(.2,.8,.2,1), transform .5s cubic-bezier(.2,.8,.2,1); will-change: transform, opacity; }
-  #content { transition: opacity .45s cubic-bezier(.2,.8,.2,1), transform .5s cubic-bezier(.2,.8,.2,1), filter .45s ease; }
-  #content.dim { opacity: .22; transform: scale(.94); filter: blur(14px); }
+  #content { transition: opacity .55s cubic-bezier(.2,.8,.2,1), transform .5s cubic-bezier(.2,.8,.2,1); }
+  #content.dim { opacity: .14; }   /* solo dissolvenza: niente sfocatura né spostamenti, il testo sotto resta fermo */
   .box { position: absolute; display: flex; flex-direction: column; justify-content: center; overflow: hidden; line-height: 1.25; }
   .box.center { text-align: center; align-items: center; }
   .w, .sp { transition: background .25s ease; }
   .w.hl, .sp.hl { background: rgba(255,207,92,.45); }
   .w.hl-s { border-radius: .12em 0 0 .12em; } .w.hl-e { border-radius: 0 .12em .12em 0; } .w.hl-s.hl-e { border-radius: .12em; }
-  #zoom { display: flex; align-items: center; justify-content: center; pointer-events: none; opacity: 0; }
+  #zoom { display: flex; align-items: center; justify-content: center; pointer-events: none; opacity: 0; transition: opacity .55s cubic-bezier(.2,.8,.2,1); }
   #zoom.on { opacity: 1; }
   #zoomText { position: absolute; left: 9%; right: 9%; top: 18%; bottom: 18%; display: flex; align-items: center; justify-content: center; text-align: center;
     font-weight: 600; line-height: 1.22; }

@@ -365,8 +365,10 @@ function highlight(s) {
   document.querySelectorAll('#content .sp').forEach((x) => x.classList.toggle('hl', !want && !!hl && +x.dataset.s >= hl[0] && +x.dataset.s < hl[1]));
   const z = $('#zoom'), zt = $('#zoomText'), c = $('#content');
   if (want) {
-    const sel = ws.filter((w) => inR(+w.dataset.w));
-    zt.innerHTML = `<span>${esc(sel.map((w) => w.textContent).join(' '))}</span>`;
+    const sel = ws.filter((w) => inR(+w.dataset.w)), txt = sel.map((w) => w.textContent).join(' ');
+    if (zoomOn && zt.textContent === txt) return;
+    if (zoomOn) zt.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 450, easing: 'ease' });   // selezione cambiata: dissolvenza, niente salti
+    zt.innerHTML = `<span>${esc(txt)}</span>`;
     zt.style.fontFamily = getComputedStyle(sel[0]).fontFamily;
     fit(zt, Math.round(H() * 0.14));
     if (!zoomOn) {   // FLIP: parte da dove sono le parole evidenziate
@@ -377,7 +379,7 @@ function highlight(s) {
       zt.style.transition = 'none';
       zt.style.transform = `translate(${from.x - (to.left + to.width / 2)}px, ${from.y - (to.top + to.height / 2)}px) scale(${k})`;
       void zt.offsetWidth;
-      zt.style.transition = 'transform .6s cubic-bezier(.2,.8,.2,1)';
+      zt.style.transition = 'transform .7s cubic-bezier(.22,.9,.24,1)';
       zt.style.transform = 'none';
     }
     z.classList.add('on'); c.classList.add('dim'); zoomOn = true;

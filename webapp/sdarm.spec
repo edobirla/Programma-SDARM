@@ -10,7 +10,8 @@ from PyInstaller.utils.hooks import collect_all
 ROOT = os.path.dirname(SPECPATH)
 VERSION = re.search(r'VERSION = "([^"]+)"', open(os.path.join(SPECPATH, "server.py"), encoding="utf-8").read()).group(1)
 
-datas = [(os.path.join(ROOT, "assets"), "assets"), (os.path.join(SPECPATH, "static"), "webapp/static")]
+datas = [(os.path.join(ROOT, "assets"), "assets"), (os.path.join(SPECPATH, "static"), "webapp/static"),
+         (os.path.join(SPECPATH, "hymn_links.json"), "webapp")]
 for f in sorted(os.listdir(os.path.join(ROOT, "bibles"))):
     if f.lower().endswith(".db"):
         datas.append((os.path.join(ROOT, "bibles", f), "bibles"))

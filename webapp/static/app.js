@@ -149,7 +149,7 @@ const setThemeColor = (t) => { const m = $('meta[name="theme-color"]'); if (m) m
 async function boot() {
   if (window.CLOUD && !window.ROOM) return pairScreen();
   const b = await api.get('/api/bootstrap');
-  S.settings = b.settings || {}; S.prayers = b.prayers || []; S.dbs = b.dbs; S.langs = b.langs; S.version = b.version; S.data = b.data;
+  S.settings = b.settings || {}; S.prayers = b.prayers || []; S.dbs = b.dbs; S.linksDefault = b.hymn_links || []; S.langs = b.langs; S.version = b.version; S.data = b.data;
   S.secs = (b.schedule || []).map((s) => ({ id: s.id || uid(), name: s.name, time: s.time || '', slots: s.slots || [] }));
   if (!S.secs.length) S.secs = ['Scuola del Sabato', 'Culto', 'Pausa', 'Pomeriggio'].map((n) => ({ id: uid(), name: n, time: '', slots: [] }));
   if (b.live && b.live.state && b.live.state.kind !== 'none') S.live = b.live.state;
@@ -190,7 +190,7 @@ async function boot() {
 // dati cambiati altrove: si ricaricano (senza disturbare chi sta scrivendo)
 async function resync() {
   const b = await api.get('/api/bootstrap');
-  S.settings = b.settings || {}; S.prayers = b.prayers || []; S.dbs = b.dbs;
+  S.settings = b.settings || {}; S.prayers = b.prayers || []; S.dbs = b.dbs; S.linksDefault = b.hymn_links || [];
   if (!S.drag) S.secs = (b.schedule || []).map((s) => ({ id: s.id || uid(), name: s.name, time: s.time || '', slots: s.slots || [] }));
   const a = document.activeElement;
   if (!(a && a.matches('input,textarea,select') && a.closest('#main,#modal'))) renderMain();
@@ -264,6 +264,36 @@ async function loadHymns(force) {
   if (db !== S.hymnsDb) return;
   S.hymns = S.hymnsBy[db];
   if (S.view === 'inni') renderMain();
+}
+/* ── inni corrispondenti in altri innari (es. 17 italiano = 523 rumeno = 327 spagnolo) ──
+   li vede solo chi guida, mai la proiezione. Gli innari si riconoscono dal nome della
+   cartella, così quando si caricano quelli rumeni e spagnoli i collegamenti ci sono già */
+const HYMNALS = [[/avventist/i, 'Innario avventista', 'IT'], [/riformist/i, 'Nuovo innario riformista', 'IT rif.'], [/himn|espa[nñ]ol/i, 'Himnario Adventista', 'ES'],
+  [/cre[sşș]tine/i, 'Imnuri Crestine', 'RO'], [/az[sşș]mr/i, 'Imnuri azsmr', 'RO AZȘMR']];
+const dbKey = (db) => { const n = (db && db.name) || ''; const k = HYMNALS.find(([re]) => re.test(n)); return k ? k[1] : n; };
+const keyTag = (k) => (HYMNALS.find((x) => x[1] === k) || [0, 0, k])[2];
+const hymnLinks = () => S.settings.hymn_links || S.linksDefault || [];
+const dbOfPath = (p) => S.dbs.find((d) => p && (p === d.path || p.startsWith(d.path.replace(/\/$/, '') + '/')));
+function linkGroup(dbPath, number) {
+  const db = S.dbs.find((d) => d.path === dbPath); if (!db) return [null, null];
+  const k = dbKey(db), n = parseInt(number, 10);
+  return [k, hymnLinks().find((g) => g[k] === n) || null];
+}
+function linkedTitle(dbPath, num) {
+  const l = (S.hymnsBy && S.hymnsBy[dbPath]) || (S.hymnsLite && S.hymnsLite[dbPath]);
+  if (!l) { S.hymnsLite = S.hymnsLite || {}; S.hymnsLite[dbPath] = [];   // si carica una volta sola, poi si ridisegna
+    api.get('/api/hymns?lite=1&db=' + encodeURIComponent(dbPath)).then((r) => { S.hymnsLite[dbPath] = r.hymns || []; renderMain(); }); return ''; }
+  const h = l.find((x) => parseInt(x.number, 10) === num); return h ? h.title : '';
+}
+function linksHtml(dbPath, number) {
+  const [k, g] = linkGroup(dbPath, number); if (!k) return '';
+  const ls = g ? Object.entries(g).filter(([kk]) => kk !== k) : [];
+  const chips = ls.map(([kk, num]) => { const db = S.dbs.find((d) => d.exists && dbKey(d) === kk), t = db ? linkedTitle(db.path, num) : '';
+    return db ? `<button class="btn sm" data-a="openLinked" data-p="${esc(db.path)}" data-n="${num}" title="Apri quest'inno">${esc(keyTag(kk))} ${num}${t ? ' · ' + esc(t) : ''}</button>`
+      : `<span class="btn sm" style="opacity:.5;cursor:default" title="Innario non ancora caricato">${esc(keyTag(kk))} ${num}</span>`; }).join('');
+  if (!chips && REMOTE) return '';
+  return `<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">${chips ? '<span class="label">Anche in</span>' + chips : ''}
+    ${REMOTE ? '' : `<button class="btn sm" data-a="linkHymn" data-p="${esc(dbPath)}" data-n="${esc(number)}" style="color:var(--sub)">${chips ? 'Modifica' : 'Collega ad altri innari…'}</button>`}</div>`;
 }
 async function loadLesson() {
   S.lesson = await api.get('/api/lesson');
@@ -349,6 +379,7 @@ function render() { renderMain(); renderDock(); }
 function renderMain() {
   placePill();
   const m = $('#main');
+  const bt0 = S.view === 'bibbia' && $('#bibText'), btTop = bt0 && bt0.dataset.ch === S.bib.book + ':' + S.bib.chapter ? bt0.scrollTop : null;
   const v = { scaletta: viewScaletta, inni: viewInni, bibbia: viewBibbia, media: viewMedia, preghiere: viewPreghiere, impostazioni: viewSettings }[S.view];
   m.innerHTML = v();
   // stessa sezione: niente animazione di entrata, sennò ogni clic fa un lampo
@@ -356,10 +387,14 @@ function renderMain() {
   S.lastView = S.view;
   if (S.view === 'scaletta') afterScaletta();
   hydrateThumbs();
-  if (S.view === 'bibbia') { fitBib(); const v = $('#bibSel'); if (v) v.scrollIntoView({ block: 'nearest' }); }
+  if (S.view === 'bibbia') { fitBib(); followVerse(btTop); }
   if ($('#bigPrev')) requestAnimationFrame(scalePreview);
 }
 const findSlot = (id) => { for (const s of S.secs) { const x = s.slots.find((y) => y.id === id); if (x) return [s, x]; } return [null, null]; };
+// inno di apertura, di chiusura o generico: lo si sceglie quando lo si mette in scaletta (e si cambia nel dettaglio)
+const HYMN_ROLES = [['apertura', 'Apertura'], ['', 'Generico'], ['chiusura', 'Chiusura']];
+const typeLabel = (sl) => (sl.slot_type === 'inno' && sl.data && sl.data.role ? 'Inno di ' + sl.data.role : LABELS[sl.slot_type] || '');
+const roleSeg = (role, id) => `<div class="seg" style="align-self:flex-start">${HYMN_ROLES.map(([v, l]) => `<button class="${(role || '') === v ? 'on' : ''}" data-a="hymnRole" data-v="${v}"${id ? ` data-id="${id}"` : ''}>${l}</button>`).join('')}</div>`;
 const slotTitle = (sl) => (sl.data && sl.data.title) || sl.display_name || LABELS[sl.slot_type] || 'Elemento';
 
 function viewScaletta() {
@@ -386,7 +421,7 @@ function viewScaletta() {
         <div class="row ${sl.id === S.sel ? 'sel' : ''}" draggable="true" data-row="${si}:${sj}" data-a="pick" data-id="${sl.id}">
           <span class="grip tool">${GRIP}</span>
           <span class="ic" style="background:${COLORS[sl.slot_type] || '#888'}2e;color:${COLORS[sl.slot_type] || '#888'}">${svg(sl.slot_type in ICON ? sl.slot_type : 'testo', 15)}</span>
-          <span class="tt"><b>${esc(slotTitle(sl))}</b><span>${LABELS[sl.slot_type] || ''}</span></span>
+          <span class="tt"><b>${esc(slotTitle(sl))}</b><span>${typeLabel(sl)}</span></span>
           <span class="mark" data-mark="${sl.id}"></span>
           <button class="xbtn tool" data-a="delSlot" data-id="${sl.id}" aria-label="Togli dalla scaletta">${svg('x', 11, false, 2.6)}</button>
         </div>`).join('')}
@@ -418,13 +453,16 @@ function detailHtml() {
     ${svg('scaletta', 40, false, 1.5)}<span style="font-size:17px;font-weight:650;color:var(--text)">Seleziona un elemento</span>
     <span>Oppure aggiungine uno con «Aggiungi» o dalla ricerca in alto.</span></div>`;
   const t = sl.slot_type, c = COLORS[t] || '#888';
-  const head = `<div><span class="label" style="color:${c}">${LABELS[t]} · ${esc(sec.name)}</span><h1>${esc(slotTitle(sl))}</h1></div>`;
+  const head = `<div><span class="label" style="color:${c}">${typeLabel(sl)} · ${esc(sec.name)}</span><h1>${esc(slotTitle(sl))}</h1></div>`;
   const body = ({ inno: detInno, versetto: detVersetto, lezione: detLezione, timer: detTimer, testo: detTesto,
     immagine: detImmagine, qrcode: detQr, preghiera: detPreghiera, presentazione: detDeck, video: detVideo, audio: detAudio }[t] || detGeneric)(sl);
   // i pulsanti principali (proietta, modifica, cambia) vanno sulla riga del titolo
   const tmp = document.createElement('div'); tmp.innerHTML = body; const acts = tmp.querySelector('.det-acts'); if (acts) acts.remove();
   return SHEET_X + `<div class="det-head">${head}${acts ? acts.outerHTML : ''}</div><div style="display:flex;flex-direction:column;gap:14px">${tmp.innerHTML}</div>`;
 }
+// accanto alla base: da quale inno viene (se è presa da un'altra lingua) o avviso se è cantata
+const baseNote = (from, sung) => (from ? `<span style="font-size:12px;color:var(--sub)">Base dell'inno ${esc(from)}</span>` : '')
+  + (sung ? `<span style="font-size:12px;font-weight:650;color:var(--danger)">⚠︎ Base cantata (con le voci)</span>` : '');
 function playerHtml(id, title, kind) {
   const a = kind === 'pm' ? $('#pmAudio') : $('#baseAudio');
   const dur = a.duration || 0, pos = a.currentTime || 0, playing = !a.paused;
@@ -456,8 +494,9 @@ function detInno(sl) {
   const h = sl.data.hymn;
   if (!h) return `<button class="btn pri" data-a="changeIn" data-id="${sl.id}" data-v="inni" style="align-self:flex-start">Scegli l'inno</button>`;
   const liveI = S.live.kind === 'hymn' && S.live.file === h.path ? S.live.i : -1;
-  return `<div class="slides" data-thumbs="${esc(h.path)}" data-id="${sl.id}" data-live="${liveI}"></div>
-    ${h.audio_path ? playerHtml('base', h.number + ' — ' + h.title, 'base') : ''}
+  const hdb = dbOfPath(h.path);
+  return `${roleSeg(sl.data.role, sl.id)}${hdb ? linksHtml(hdb.path, h.number) : ''}<div class="slides" data-thumbs="${esc(h.path)}" data-id="${sl.id}" data-live="${liveI}"></div>
+    ${h.audio_path ? playerHtml('base', h.number + ' — ' + h.title, 'base') + baseNote(h.audio_from, h.audio_sung) : ''}
     <div class="det-acts"><button class="btn pri" data-a="projHymn" data-id="${sl.id}" data-i="0">Proietta inno</button>
     <button class="btn" data-a="editHymn" data-p="${esc(h.path)}">Modifica testo e dimensione</button>
     <button class="btn" data-a="changeIn" data-id="${sl.id}" data-v="inni">Cambia inno</button></div>`;
@@ -746,8 +785,9 @@ function detLezione() {
       ${q.refs.map((r, i) => `<div class="soft" style="display:flex;flex-direction:column;gap:8px"><div style="display:flex;align-items:center"><b style="color:#de7949;flex:1;font-size:12.5px">${esc(r.resolved ? r.book_name + ' ' + r.chapter + ':' + r.verses.join(',') : r.raw)}</b>
         <button class="btn sm" data-a="projCit" data-i="${i}">Proietta</button></div><div style="color:var(--sub);font-size:13px">${esc(r.resolved ? r.texts.join(' ').slice(0, 260) : 'Riferimento non riconosciuto: verrà proiettato il testo scritto')}</div></div>`).join('')}
     </div>
-    ${q.note ? `<div class="soft"><div style="display:flex;align-items:center"><b style="flex:1;color:var(--sub)">Nota</b><button class="btn sm" data-a="projNota">Proietta</button></div>
-      <div style="color:var(--sub);font-style:italic;margin-top:6px">${esc(q.note.length > 420 ? q.note.slice(0, 420) + '…' : q.note)}</div></div>` : ''}`;
+    ${q.note ? `<div class="soft" style="display:flex;flex-direction:column;gap:6px"><div style="display:flex;align-items:center"><b style="flex:1;color:var(--sub)">Nota${noteParas(q.note).length > 1 ? ' · ' + noteParas(q.note).length + ' paragrafi' : ''}</b><button class="btn sm" data-a="projNota" data-i="0">Proietta</button></div>
+      ${noteParas(q.note).map((t, i) => { const on = S.live.kind === 'lesson' && S.live.qIdx === S.qIdx && S.live.part === 'nota' && S.live.pos === i;
+        return `<button class="list-row" data-a="projNota" data-i="${i}" style="align-items:flex-start;text-align:left;font-style:italic;font-size:13px;color:var(--sub);${on ? 'background:rgba(52,199,89,.14);box-shadow:inset 0 0 0 1.5px rgba(52,199,89,.5)' : 'background:var(--fill)'}">${esc(t.length > 260 ? t.slice(0, 260) + '…' : t)}</button>`; }).join('')}</div>` : ''}`;
 }
 // «9:30», «9.30», «930», «9» -> "09:30"; null se non è un'ora
 const parseHM = (s) => { const m = /^\s*(\d{1,2})(?:[:.,\s]?(\d{2}))?\s*$/.exec(s || ''); if (!m || +m[1] > 23 || +(m[2] || 0) > 59) return null;
@@ -864,16 +904,16 @@ function hymnListHtml() {
     return `<button class="list-row ${i === S.hymnSel ? 'sel' : ''}" data-a="pickHymn" data-i="${i}" style="${inText ? 'align-items:flex-start' : ''}">
     <span style="width:42px;font-weight:750;color:var(--faint);font-variant-numeric:tabular-nums">${markQ(x.number, q)}</span>
     <span style="flex:1;min-width:0"><span style="display:block;font-size:14.5px;font-weight:580">${markQ(x.title, q)}</span>${inText && x.slides ? `<span style="display:block;font-size:12.5px;color:var(--sub);margin-top:2px">${snip(x.slides.join(' · '), q)}</span>` : ''}</span>
-    ${hymnEdit(x.path) ? `<span title="Modificato nell'app" style="color:var(--faint)">${svg('pen', 13)}</span>` : ''}${x.audio ? `<span style="color:#888dec">${svg('inno', 16, false, 2.2)}</span>` : ''}</button>`; }).join('');
+    ${x.audio ? `<span style="color:#888dec">${svg('inno', 16, false, 2.2)}</span>` : ''}</button>`; }).join('');
 }
 // «Cambia inno / versetto»: si sceglie e si sostituisce l'elemento, senza aggiungerne un altro
 const replaceBar = () => { const [, sl] = findSlot(S.replaceSlot); return sl ? `<div class="soft" style="display:flex;align-items:center;gap:10px;background:rgba(61,123,240,.14);box-shadow:inset 0 0 0 1.5px rgba(61,123,240,.5)">
   <span style="flex:1">Stai scegliendo per <b>«${esc(slotTitle(sl))}»</b> nella scaletta</span><button class="btn sm" data-a="cancelReplace">Annulla</button></div>` : ''; };
 function hymnPrevHtml() {
   const h = S.hymns[S.hymnSel]; if (!h) return '';
-  return `${SHEET_X}<div style="font-size:22px;font-weight:750">${esc(h.number)} · ${esc(h.title)}</div>
+  return `${SHEET_X}<div style="font-size:22px;font-weight:750">${esc(h.number)} · ${esc(h.title)}</div>${linksHtml(S.hymnsDb, h.number)}
     <div class="slides scr" data-thumbs="${esc(h.path)}" style="grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;flex:1;min-height:0;align-content:start"></div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">${h.audio ? `<button class="btn sm" data-a="playBase">${svg('inno', 14, false, 2.2)}Base musicale</button>` : ''}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${h.audio ? `<button class="btn sm" data-a="playBase">${svg('inno', 14, false, 2.2)}Base musicale</button>${baseNote(h.audio_from, h.audio_sung)}` : ''}
       <button class="btn sm" data-a="baseForHymn">${h.audio ? 'Cambia base…' : 'Aggiungi base…'}</button>
       <button class="btn sm" data-a="editHymn" data-p="${esc(h.path)}">Modifica testo e dimensione</button>
       <button class="btn sm danger" data-a="delHymn" data-p="${esc(h.path)}">${S.delHymn === h.path ? 'Sicuro? Tocca di nuovo' : 'Elimina inno'}</button></div>
@@ -917,6 +957,28 @@ function fitBib() {
   });
 }
 window.addEventListener('resize', () => { if (S.view === 'bibbia') fitBib(); });
+/* il versetto in onda resta al centro della lista (si vedono quelli prima e dopo);
+   in fondo al capitolo la lista non scorre più e il verde scende fino all'ultimo */
+let lastLiveV = '', lastCenterAt = 0, glideT = 0;
+// scorrimento morbido fatto a mano (quello del browser a volte non parte); in ogni caso arriva a destinazione
+function glide(el, top, smooth) {
+  top = Math.max(0, Math.min(el.scrollHeight - el.clientHeight, top)); clearTimeout(glideT);
+  const from = el.scrollTop, t0 = performance.now(), D = 320;
+  if (!smooth || Math.abs(top - from) < 2) { el.scrollTop = top; return; }
+  const tick = (t) => { const k = Math.min(1, (t - t0) / D); el.scrollTop = from + (top - from) * (1 - Math.pow(1 - k, 3)); if (k < 1) requestAnimationFrame(tick); };
+  requestAnimationFrame(tick); glideT = setTimeout(() => { el.scrollTop = top; }, D + 80);
+}
+function followVerse(prevTop) {
+  const bt = $('#bibText'), row = $('#bibLive') || $('#bibSel'); if (!bt || !row) return;
+  if (prevTop != null) bt.scrollTop = prevTop;   // si riparte da dove era, così lo scorrimento è morbido
+  const key = $('#bibLive') ? S.live.book + ':' + S.live.chapter + ':' + S.live.verse : '';
+  const r = row.getBoundingClientRect(), b = bt.getBoundingClientRect();
+  // un secondo ridisegno a scorrimento appena partito non lo deve fermare a metà
+  if (key && (key !== lastLiveV || Date.now() - lastCenterAt < 600)) { if (key !== lastLiveV) lastCenterAt = Date.now();
+    glide(bt, bt.scrollTop + r.top - b.top - (b.height - r.height) / 2, prevTop != null); }
+  else if (!key && (r.top < b.top || r.bottom > b.bottom)) row.scrollIntoView({ block: 'nearest' });
+  lastLiveV = key;
+}
 function viewBibbia() {
   const b = S.bib, nt = b.testament === 'NT';
   const books = b.books.filter((x, i) => (nt ? i >= 39 : i < 39));
@@ -939,11 +1001,11 @@ function viewBibbia() {
         </div><div class="bsec"><span class="label">Versetto</span>
         <div class="bgrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(46px,1fr));gap:5px">${Array.from({ length: vcount }, (_, i) => `<button class="grid-btn ${i + 1 === b.verse ? 'on' : ''}" data-a="verseNum" data-v="${i + 1}">${i + 1}</button>`).join('')}</div></div>
       </div>
-      <div class="scr bib-text" id="bibText" style="flex:1.7;min-width:0;display:flex;flex-direction:column;gap:6px">
+      <div class="scr bib-text" id="bibText" data-ch="${b.book}:${b.chapter}" style="flex:1.7;min-width:0;display:flex;flex-direction:column;gap:6px">
         <button class="btn sm phone-only" data-a="bibStep" data-v="1" style="align-self:flex-start">${svg('prev', 14, false, 2.4)}Capitoli e versetti</button>
         <div style="display:flex;align-items:center;gap:10px;min-height:44px;position:sticky;top:0;z-index:2;background:var(--solid);border-radius:14px;padding:4px 4px 4px 10px"><span style="font-size:21px;font-weight:750;flex:1">${esc(bookName(b.book))} ${b.chapter}:${b.verse}</span>
           ${S.replaceSlot ? '<button class="btn sm pri" data-a="useVerse">Usa questo versetto</button>' : '<button class="btn sm" data-a="addVerse">+ Scaletta</button>'}<button class="btn sm pri" data-a="projVerse">Proietta</button></div>
-        ${b.verses.map(([n, t]) => `<button class="list-row ${n === liveV ? '' : n === b.verse ? 'sel' : ''}" ${n === b.verse ? 'id="bibSel"' : ''} data-a="verseNum" data-v="${n}" style="align-items:flex-start;font-size:16px;${n === liveV ? 'background:rgba(52,199,89,.14);box-shadow:inset 0 0 0 1.5px rgba(52,199,89,.5)' : 'background:var(--fill)'}">
+        ${b.verses.map(([n, t]) => `<button class="list-row ${n === liveV ? '' : n === b.verse ? 'sel' : ''}" ${n === liveV ? 'id="bibLive"' : n === b.verse ? 'id="bibSel"' : ''} data-a="verseNum" data-v="${n}" style="align-items:flex-start;font-size:16px;${n === liveV ? 'background:rgba(52,199,89,.14);box-shadow:inset 0 0 0 1.5px rgba(52,199,89,.5)' : 'background:var(--fill)'}">
           <b style="width:28px;color:#de7949;flex-shrink:0">${n}</b><span style="flex:1;line-height:1.5">${esc(t)}</span>${n === liveV ? '<b style="color:#2fb350;font-size:11px">IN ONDA</b>' : ''}</button>`).join('')}
       </div>
     </div></section>`;
@@ -1268,10 +1330,14 @@ function projDomanda() {
     label: 'Lezione ' + (les.number || '') + ' — Domanda ' + (q.day_index + 1), sub: (q.day || '') + ' · Avanti passa alla domanda dopo' }));
   if (S.view === 'scaletta') renderMain();
 }
-function projNota() {
+// la nota si proietta un paragrafo alla volta (come i versetti), così il testo resta grande
+const noteParas = (t) => (t || '').split(/\n+/).map((x) => x.trim()).filter(Boolean);
+function projNota(pos = 0) {
   const les = curLesson(); const q = les && les.domande[S.qIdx]; if (!q || !q.note) return;
-  setLive(Object.assign(lessonHeader(q), { kind: 'lesson', part: 'nota', profile: 'nota', style: 'plain', qIdx: S.qIdx, slotId: S.sel, main: q.note, italic: true,
-    label: 'Lezione — Nota', sub: 'Domanda ' + (q.day_index + 1) }));
+  const ps = noteParas(q.note); pos = Math.max(0, Math.min(ps.length - 1, pos));
+  setLive(Object.assign(lessonHeader(q), { kind: 'lesson', part: 'nota', profile: 'nota', style: 'plain', qIdx: S.qIdx, slotId: S.sel, main: ps[pos], italic: true, pos,
+    label: 'Lezione — Nota', sub: 'Domanda ' + (q.day_index + 1) + (ps.length > 1 ? ' · Paragrafo ' + (pos + 1) + ' di ' + ps.length : '') }));
+  if (S.view === 'scaletta') renderMain();
 }
 function projCit(i) {
   const les = curLesson(); const q = les && les.domande[S.qIdx]; if (!q) return; const r = q.refs[i];
@@ -1378,6 +1444,8 @@ async function step(d) {
     const q = curLesson().domande[L.qIdx]; const r = q.refs[L.cit]; if (!r.resolved) return;
     const pos = L.pos + d; if (pos < 0 || pos >= r.verses.length) return;
     setLive(Object.assign({}, L, { pos, main: r.texts[pos], ref: r.book_name + ' ' + r.chapter + ':' + r.verses[pos], label: r.book_name + ' ' + r.chapter + ':' + r.verses[pos] }));
+  } else if (L.kind === 'lesson' && L.part === 'nota' && L.pos + d >= 0 && L.pos + d < noteParas(curLesson().domande[L.qIdx].note).length) {
+    S.qIdx = L.qIdx; projNota(L.pos + d);
   } else if (L.kind === 'lesson') {
     const n = curLesson().domande.length; const i = L.qIdx + d;
     if (i < 0) { S.intro = true; return projIntro(2); }   // indietro dalla prima domanda: la nota introduttiva
@@ -1557,13 +1625,13 @@ async function mediaImport(p) {
 function askWhere(slot) {
   S.pending = slot;
   if (S.addTo != null && S.secs[S.addTo]) { const si = S.addTo; S.addTo = null; return act.insertAt(null, { s: si, k: S.secs[si].slots.length }); }
-  modal(`<div><div style="font-size:18px;font-weight:750">Dove lo aggiungo?</div><div style="color:var(--sub)">${esc(slotTitle(slot))}</div></div>
+  modal(`<div><div style="font-size:18px;font-weight:750">Dove lo aggiungo?</div><div style="color:var(--sub)">${esc(slotTitle(slot))}</div></div>${slot.slot_type === 'inno' ? roleSeg(slot.data.role) : ''}
     <div class="scr" style="display:flex;flex-direction:column;gap:12px;max-height:56vh">${S.secs.map((sec, si) => `<div style="display:flex;flex-direction:column;gap:4px"><span class="label" style="padding:0 6px">${esc(sec.name)}</span>
       ${[{ l: "All'inizio" }].concat(sec.slots.map((x) => ({ l: 'Dopo «' + slotTitle(x) + '»' }))).map((p, k) => `<button class="menu-row soft" data-a="insertAt" data-s="${si}" data-k="${k}" style="min-height:38px;font-size:13px">${svg('plus', 14, false, 2.4)}${esc(p.l)}</button>`).join('')}</div>`).join('')}</div>
     <button class="btn" data-a="closeModal" style="align-self:flex-end">Annulla</button>`, 480);
 }
 const hymnSlot = (h) => ({ id: uid(), slot_type: 'inno', display_name: 'Inno ' + h.number + ' — ' + h.title,
-  data: { hymn: { number: h.number, title: h.title, path: h.path, audio_path: h.audio, slides_text: h.slides } } });
+  data: { hymn: { number: h.number, title: h.title, path: h.path, audio_path: h.audio, audio_from: h.audio_from || '', audio_sung: !!h.audio_sung, slides_text: h.slides } } });
 async function verseSlot(book, chapter, verse) {
   const langs = [lang()].concat(S.settings.bible_extra_langs || []);
   const texts = await api.get(`/api/bible/verse?book=${book}&ch=${chapter}&v=${verse}&langs=${langs.join(',')}`);
@@ -1660,10 +1728,12 @@ function setupWords() {
   const at = (e) => { const el = document.elementFromPoint(e.clientX, e.clientY); return el && el.closest && el.closest('#words [data-w], #words [data-s]'); };
   const idx = (el) => (el.dataset.w != null ? +el.dataset.w : +el.dataset.s);
   document.addEventListener('pointerdown', (e) => { const w = e.target.closest && e.target.closest('#words [data-w], #words [data-s]'); if (!w) return; e.preventDefault();
-    S.dragFrom = idx(w); S.hl = [S.dragFrom, S.dragFrom]; paintWords(); pushHl(); });
+    S.dragFrom = idx(w); S.hl = [S.dragFrom, S.dragFrom]; paintWords(); });
   document.addEventListener('pointermove', (e) => { if (S.dragFrom === null) return; const w = at(e); if (!w) return; const n = idx(w);
-    if (S.hl && S.hl[1] === n) return; S.hl = [S.dragFrom, n]; paintWords(); pushHl(); });
-  ['pointerup', 'pointercancel'].forEach((t) => document.addEventListener(t, () => { S.dragFrom = null; }));
+    if (S.hl && S.hl[1] === n) return; S.hl = [S.dragFrom, n]; paintWords(); });
+  // in sala arriva solo la selezione finita: mentre si trascina il testo proiettato non si muove
+  document.addEventListener('pointerup', () => { if (S.dragFrom === null) return; S.dragFrom = null; pushHl(); });
+  document.addEventListener('pointercancel', () => { S.dragFrom = null; });
 }
 function paintWords() { const [a, b] = S.hl ? [Math.min(...S.hl), Math.max(...S.hl)] : [-1, -2]; $$('#words [data-w]').forEach((w) => w.classList.toggle('hl', +w.dataset.w >= a && +w.dataset.w <= b)); $$('#words [data-s]').forEach((x) => x.classList.toggle('hl', +x.dataset.s >= a && +x.dataset.s < b)); }
 let hlT = 0;
@@ -1706,7 +1776,7 @@ const autoOutputs = () => { if (!REMOTE && !S.outputs && S.live.kind !== 'none' 
 const act = {
   changeIn: (el, d) => { S.replaceSlot = d.id; S.view = d.v; S.sheet = false; renderMain(); },
   cancelReplace: () => { S.view = 'scaletta'; S.replaceSlot = null; renderMain(); },
-  useHymn: () => { const [, sl] = findSlot(S.replaceSlot), n = hymnSlot(S.hymns[S.hymnSel]); if (sl) { sl.data = n.data; sl.display_name = n.display_name; S.sel = sl.id; saveSchedule(); }
+  useHymn: () => { const [, sl] = findSlot(S.replaceSlot), n = hymnSlot(S.hymns[S.hymnSel]); if (sl) { sl.data = Object.assign(n.data, { role: sl.data.role }); sl.display_name = n.display_name; S.sel = sl.id; saveSchedule(); }
     S.replaceSlot = null; S.view = 'scaletta'; renderMain(); toast('Inno cambiato'); },
   useVerse: async () => { const [, sl] = findSlot(S.replaceSlot), n = await verseSlot(S.bib.book, S.bib.chapter, S.bib.verse); if (sl) { sl.data = n.data; sl.display_name = n.display_name; S.sel = sl.id; saveSchedule(); }
     S.replaceSlot = null; S.view = 'scaletta'; renderMain(); toast('Versetto cambiato'); },
@@ -1748,6 +1818,9 @@ const act = {
     const pk = { immagine: ['immagini', 'image', 'l\'immagine'], video: ['video', 'video', 'il video'], audio: ['audio', 'audio', 'l\'audio'], presentazione: ['presentazioni', 'deck', 'il PowerPoint o il PDF'] }[t];
     if (pk) { const ps = await pickInto('file', pk[0], 'Scegli ' + pk[2], pk[1]); if (!ps.length) { S.addTo = null; return; } return addFileSlot(ps[0]); }
     askWhere({ id: uid(), slot_type: t, display_name: LABELS[t], data: t === 'timer' ? { minutes: 10 } : {} }); },
+  hymnRole: (el, d) => { const sl = d.id ? findSlot(d.id)[1] : S.pending; if (!sl) return; sl.data.role = d.v || undefined;
+    if (!d.id) return el.parentNode.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === el));   // nella finestra «Dove lo aggiungo?»
+    saveSchedule(); renderMain(); },
   insertAt: (el, d) => { const sec = S.secs[+d.s]; sec.slots.splice(+d.k, 0, S.pending); S.sel = S.pending.id; closeModal(); saveSchedule(); S.view = 'scaletta'; renderMain(); toast('Aggiunto in «' + sec.name + '»'); },
   templates: () => { const T = S.settings.schedule_templates || [];
     modal(`<div style="font-size:18px;font-weight:750">Modelli di scaletta</div>
@@ -1764,7 +1837,7 @@ const act = {
   // lezione
   lezDay: (el, d) => { if (d.v === 'intro') S.intro = true; else { S.intro = false; S.qIdx = +d.v; } $('#detail').innerHTML = detailHtml(); },
   qStep: (el, d) => { const n = curLesson().domande.length; S.qIdx = Math.max(0, Math.min(n - 1, S.qIdx + +d.d)); $('#detail').innerHTML = detailHtml(); },
-  projDomanda, projNota: () => projNota(), projCit: (el, d) => projCit(+d.i), projIntro: () => projIntro(0),
+  projDomanda, projNota: (el, d) => projNota(+(d.i || 0)), projCit: (el, d) => projCit(+d.i), projIntro: () => projIntro(0),
   editIntro: () => { const les = curLesson();
     modal(`<div style="font-size:18px;font-weight:750">Introduzione della lezione</div>
       <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:650;color:var(--sub)">Versetto chiave<textarea class="field" id="inVerse" style="height:90px;padding:10px;resize:vertical;font-size:14px;line-height:1.45">${esc(les.verse)}</textarea></label>
@@ -1794,6 +1867,26 @@ const act = {
       <div style="display:flex;justify-content:flex-end"><button class="btn" data-a="closeModal">Chiudi</button></div>`, 640); },
   copyPrompt: (el, d) => { const t = $('#' + d.t); t.select(); document.execCommand('copy'); t.setSelectionRange(0, 0); toast('Prompt copiato'); },
   // inni
+  openLinked: async (el, d) => { closeModal(); S.hymnsDb = d.p; S.dbMenu = false; S.replaceSlot = null; S.view = 'inni'; S.hymnQ = ''; setSetting('last_database', d.p);
+    S.hymns = []; await loadHymns(); S.hymnSel = Math.max(0, S.hymns.findIndex((h) => parseInt(h.number, 10) === +d.n)); S.sheet = REMOTE; renderMain();
+    const r = $('#hymnList .list-row.sel'); if (r) r.scrollIntoView({ block: 'center' }); },
+  linkHymn: (el, d) => {
+    const [k, g] = linkGroup(d.p, d.n); const cur = g || {};
+    const keys = [...new Set(S.dbs.map(dbKey).concat(Object.keys(cur)))].filter((x) => x !== k);
+    modal(`<div><div style="font-size:18px;font-weight:750">Inno ${esc(d.n)} negli altri innari</div><div style="color:var(--sub)">Scrivi il numero corrispondente; lascia vuoto se non c'è. Non si vede in proiezione.</div></div>
+      <div style="display:flex;flex-direction:column;gap:8px">${keys.map((kk) => `<label style="display:flex;align-items:center;gap:10px"><span style="flex:1">${esc(kk)}${S.dbs.some((x) => x.exists && dbKey(x) === kk) ? '' : ' <span style="color:var(--faint);font-size:12px">(non ancora caricato)</span>'}</span>
+        <input class="field" data-link="${esc(kk)}" inputmode="numeric" value="${cur[kk] || ''}" style="width:90px;text-align:center"></label>`).join('') || '<span style="color:var(--sub)">Carica un altro innario in Impostazioni per collegarlo.</span>'}</div>
+      <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" data-a="closeModal">Annulla</button><button class="btn pri" data-a="saveLinks" data-k="${esc(k)}" data-n="${esc(d.n)}">Salva</button></div>`, 440);
+  },
+  saveLinks: (el, d) => {
+    const ng = { [d.k]: parseInt(d.n, 10) };
+    $$('[data-link]').forEach((i) => { const n = parseInt(i.value, 10); if (n > 0) ng[i.dataset.link] = n; });
+    const pairs = Object.entries(ng);
+    // chi era già in un altro gruppo ne esce, così ogni inno sta in un solo gruppo
+    let all = hymnLinks().map((g) => Object.fromEntries(Object.entries(g).filter(([kk, n]) => !pairs.some(([pk, pn]) => pk === kk && pn === n))));
+    all = all.filter((g) => Object.keys(g).length > 1); if (pairs.length > 1) all.push(ng);
+    setSetting('hymn_links', all); closeModal(); renderMain(); toast('Collegamenti salvati');
+  },
   pickHymn: (el, d) => { S.hymnSel = +d.i; S.sheet = REMOTE;   // solo elenco e anteprima, senza ridisegnare la pagina
     $$('#hymnList .list-row').forEach((r) => r.classList.toggle('sel', r.dataset.i === d.i));
     const pv = $('#hymnPrev'); pv.innerHTML = hymnPrevHtml(); pv.classList.toggle('open', S.sheet); hydrateThumbs(); },
