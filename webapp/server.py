@@ -57,7 +57,7 @@ def hymn_links_default():
         return []
 ASSETS = os.path.join(ROOT, "assets")
 PORT = int(os.environ.get("SDARM_PORT") or os.environ.get("PORT") or "8765")
-VERSION = "2.0.15"
+VERSION = "2.0.16"
 # identifica questa copia dell'app: l'avvio spegne i motori di versioni precedenti
 BUILD = str(int(os.path.getmtime(sys.executable if FROZEN else os.path.abspath(__file__))))
 AUDIO_EXT = (".mp3", ".m4a", ".wav", ".ogg", ".aac", ".flac")
@@ -604,7 +604,8 @@ def borrow_audio(folder, out):
     found = {}
     for h in out:
         h["audio_sung"] = bool(h["audio"]) and key in SUNG_HYMNALS
-        if h["audio"] or not h["number"].isdigit():
+        # base propria normale: resta quella. Base cantata: meglio quella normale dell'inno corrispondente, se c'è
+        if (h["audio"] and not h["audio_sung"]) or not h["number"].isdigit():
             continue
         g = next((g for g in links if g.get(key) == int(h["number"])), None)
         for k, n in (g or {}).items():
@@ -613,7 +614,7 @@ def borrow_audio(folder, out):
             d, tag = others[k]
             a = found.setdefault(d, audio_by_number(d)).get(n)
             if a:
-                h["audio"], h["audio_from"] = rel(a), f"{tag} {n}"
+                h["audio"], h["audio_from"], h["audio_sung"] = rel(a), f"{tag} {n}", False
                 break
 
 

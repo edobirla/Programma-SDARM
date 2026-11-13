@@ -463,11 +463,14 @@ function detailHtml() {
 // accanto alla base: da quale inno viene (se è presa da un'altra lingua) o avviso se è cantata
 const baseNote = (from, sung) => (from ? `<span style="font-size:12px;color:var(--sub)">Base dell'inno ${esc(from)}</span>` : '')
   + (sung ? `<span style="font-size:12px;font-weight:650;color:var(--danger)">⚠︎ Base cantata (con le voci)</span>` : '');
-function playerHtml(id, title, kind) {
-  const a = kind === 'pm' ? $('#pmAudio') : $('#baseAudio');
-  const dur = a.duration || 0, pos = a.currentTime || 0, playing = !a.paused;
+// path: la base di questo inno. Se il lettore sta suonando un'altra base, questo resta fermo a zero
+// e il suo ▶ fa partire la sua (prima mostrava e riprendeva la base di un altro inno)
+const ownsBase = (a, path) => !path || a.dataset.p === path;
+function playerHtml(id, title, kind, path) {
+  const a = kind === 'pm' ? $('#pmAudio') : $('#baseAudio'), mine = kind === 'pm' || ownsBase(a, path);
+  const dur = mine ? a.duration || 0 : 0, pos = mine ? a.currentTime || 0 : 0, playing = mine && !a.paused;
   const col = kind === 'pm' ? 'var(--warn)' : 'var(--accent)';
-  return `<div class="card player" data-player="${kind}">
+  return `<div class="card player" data-player="${kind}"${path ? ` data-ppath="${esc(path)}"` : ''}>
     <div style="display:flex;align-items:center;gap:10px">
       <span style="width:30px;height:30px;border-radius:10px;background:${kind === 'pm' ? 'rgba(227,141,61,.2)' : 'rgba(136,141,236,.22)'};color:${kind === 'pm' ? '#e38d3d' : '#aab0ff'};display:flex;align-items:center;justify-content:center">${svg('inno', 15)}</span>
       <div style="display:flex;flex-direction:column;flex:1;min-width:0"><span class="label">${kind === 'pm' ? 'Musica di pausa' : 'Base musicale'}</span><b style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" data-ptitle>${esc(title)}</b></div>
@@ -496,7 +499,7 @@ function detInno(sl) {
   const liveI = S.live.kind === 'hymn' && S.live.file === h.path ? S.live.i : -1;
   const hdb = dbOfPath(h.path);
   return `${roleSeg(sl.data.role, sl.id)}${hdb ? linksHtml(hdb.path, h.number) : ''}<div class="slides" data-thumbs="${esc(h.path)}" data-id="${sl.id}" data-live="${liveI}"></div>
-    ${h.audio_path ? playerHtml('base', h.number + ' — ' + h.title, 'base') + baseNote(h.audio_from, h.audio_sung) : ''}
+    ${h.audio_path ? playerHtml('base', h.number + ' — ' + h.title, 'base', h.audio_path) + baseNote(h.audio_from, h.audio_sung) : ''}
     <div class="det-acts"><button class="btn pri" data-a="projHymn" data-id="${sl.id}" data-i="0">Proietta inno</button>
     <button class="btn" data-a="editHymn" data-p="${esc(h.path)}">Modifica testo e dimensione</button>
     <button class="btn" data-a="changeIn" data-id="${sl.id}" data-v="inni">Cambia inno</button></div>`;
@@ -900,7 +903,7 @@ function hymnListHtml() {
   }
   if (!S.hymns.length) return `<div style="color:var(--sub);padding:20px">${S.hymnsDb ? 'Caricamento…' : 'Nessun innario: aggiungi una cartella in Impostazioni.'}</div>`;
   if (!list.length) return '<div style="color:var(--sub);padding:20px">Nessun inno trovato</div>';
-  return list.slice(0, 600).map(([x, i]) => { const inText = q && !x._k.includes(q);
+  return list.map(([x, i]) => { const inText = q && !x._k.includes(q);
     return `<button class="list-row ${i === S.hymnSel ? 'sel' : ''}" data-a="pickHymn" data-i="${i}" style="${inText ? 'align-items:flex-start' : ''}">
     <span style="width:42px;font-weight:750;color:var(--faint);font-variant-numeric:tabular-nums">${markQ(x.number, q)}</span>
     <span style="flex:1;min-width:0"><span style="display:block;font-size:14.5px;font-weight:580">${markQ(x.title, q)}</span>${inText && x.slides ? `<span style="display:block;font-size:12.5px;color:var(--sub);margin-top:2px">${snip(x.slides.join(' · '), q)}</span>` : ''}</span>
@@ -1511,10 +1514,10 @@ function setupAudio() {
   const upd = () => {
     if (seeking) return;
     $$('[data-player]').forEach((el) => {
-      const a = el.dataset.player === 'pm' ? $('#pmAudio') : $('#baseAudio');
-      const r = $('[data-seek]', el); r.max = Math.max(1, Math.floor(a.duration || 0)); r.value = Math.floor(a.currentTime || 0);
-      $('[data-ppos]', el).textContent = fmt(a.currentTime); $('[data-pdur]', el).textContent = fmt(a.duration);
-      const playing = !a.paused;
+      const a = el.dataset.player === 'pm' ? $('#pmAudio') : $('#baseAudio'), mine = ownsBase(a, el.dataset.ppath);
+      const r = $('[data-seek]', el); r.max = Math.max(1, Math.floor(mine ? a.duration || 0 : 0)); r.value = Math.floor(mine ? a.currentTime || 0 : 0);
+      $('[data-ppos]', el).textContent = fmt(mine ? a.currentTime : 0); $('[data-pdur]', el).textContent = fmt(mine ? a.duration : 0);
+      const playing = mine && !a.paused;
       $('[data-pstate]', el).textContent = playing ? 'In riproduzione' : 'Pronta';
       $('[data-pstate]', el).style.color = playing ? '#2fb350' : 'var(--faint)';
       $('[data-pbtn]', el).innerHTML = svg(playing ? 'pause' : 'play', 22, true);
@@ -1537,7 +1540,7 @@ function setupAudio() {
   document.addEventListener('pointerup', () => { seeking = false; });
   document.addEventListener('input', (e) => {
     const el = e.target;
-    if (el.dataset.seek) { const a = el.dataset.seek === 'pm' ? $('#pmAudio') : $('#baseAudio'); a.currentTime = +el.value; const p = el.closest('[data-player]'); $('[data-ppos]', p).textContent = fmt(+el.value); }
+    if (el.dataset.seek) { const a = el.dataset.seek === 'pm' ? $('#pmAudio') : $('#baseAudio'), p = el.closest('[data-player]'); if (!ownsBase(a, p.dataset.ppath)) return; a.currentTime = +el.value; $('[data-ppos]', p).textContent = fmt(+el.value); }
     if (el.dataset.vol) { const a = el.dataset.vol === 'pm' ? $('#pmAudio') : $('#baseAudio'); a.volume = el.value / 100; if (el.dataset.vol === 'pm') setSetting('pause_music_volume', +el.value); }
     if (el.id === 'baseQ') { S.baseQ = el.value; baseHymnModal(); }
     if (el.id === 'mediaQ') { S.mediaQ = el.value; $('#mediaList').innerHTML = mediaListHtml(); }
@@ -1622,8 +1625,12 @@ async function mediaImport(p) {
   if (!k || !['video', 'audio'].includes(k[1])) return toast('«' + fileName(p) + '» non è un video o un audio');
   await api.post('/api/library/import', { path: p, kind: k[2] });
 }
-function askWhere(slot) {
+function askWhere(slot, roleChosen) {
   S.pending = slot;
+  // inno: prima di tutto apertura o chiusura (si può cambiare dopo, nella scaletta)
+  if (slot.slot_type === 'inno' && !roleChosen) return modal(`<div><div style="font-size:18px;font-weight:750">Inno di apertura o di chiusura?</div><div style="color:var(--sub)">${esc(slotTitle(slot))}</div></div>
+    <div style="display:flex;gap:8px">${HYMN_ROLES.map(([v, l]) => `<button class="btn${v ? ' pri' : ''}" data-a="pickRole" data-v="${v}" style="flex:1;height:48px">${l}</button>`).join('')}</div>
+    <button class="btn" data-a="closeModal" style="align-self:flex-end">Annulla</button>`, 420);
   if (S.addTo != null && S.secs[S.addTo]) { const si = S.addTo; S.addTo = null; return act.insertAt(null, { s: si, k: S.secs[si].slots.length }); }
   modal(`<div><div style="font-size:18px;font-weight:750">Dove lo aggiungo?</div><div style="color:var(--sub)">${esc(slotTitle(slot))}</div></div>${slot.slot_type === 'inno' ? roleSeg(slot.data.role) : ''}
     <div class="scr" style="display:flex;flex-direction:column;gap:12px;max-height:56vh">${S.secs.map((sec, si) => `<div style="display:flex;flex-direction:column;gap:4px"><span class="label" style="padding:0 6px">${esc(sec.name)}</span>
@@ -1821,6 +1828,7 @@ const act = {
   hymnRole: (el, d) => { const sl = d.id ? findSlot(d.id)[1] : S.pending; if (!sl) return; sl.data.role = d.v || undefined;
     if (!d.id) return el.parentNode.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === el));   // nella finestra «Dove lo aggiungo?»
     saveSchedule(); renderMain(); },
+  pickRole: (el, d) => { if (!S.pending) return; S.pending.data.role = d.v || undefined; askWhere(S.pending, true); },
   insertAt: (el, d) => { const sec = S.secs[+d.s]; sec.slots.splice(+d.k, 0, S.pending); S.sel = S.pending.id; closeModal(); saveSchedule(); S.view = 'scaletta'; renderMain(); toast('Aggiunto in «' + sec.name + '»'); },
   templates: () => { const T = S.settings.schedule_templates || [];
     modal(`<div style="font-size:18px;font-weight:750">Modelli di scaletta</div>
@@ -2056,7 +2064,11 @@ const act = {
       setLive({ kind: 'timer', style: 'timer', endAt: T.endAt, text: S.settings.timer_text || 'Il programma riprenderà tra', slotId: S.sel, label: 'Timer pausa', sub: 'In corso' }); }
     renderMain(); },
   // audio
-  audioToggle: (el, d) => { if (d.k === 'pm') { const a = $('#pmAudio'); if (a.paused) pmPlay(); else a.pause(); } else { const a = $('#baseAudio'); if (a.paused) a.play(); else a.pause(); renderDock(); } },
+  audioToggle: (el, d) => { if (d.k === 'pm') { const a = $('#pmAudio'); if (a.paused) pmPlay(); else a.pause(); } else {
+    const a = $('#baseAudio'), pl = el.closest('[data-player]'), p = pl && pl.dataset.ppath;
+    if (!ownsBase(a, p)) {   // il lettore aveva la base di un altro inno: parte quella di questo
+      a.src = amedia(p); a.dataset.p = p; a.dataset.rate = ''; S.baseTitle = $('[data-ptitle]', pl).textContent; a.play(); return renderDock(); }
+    if (a.paused) a.play(); else a.pause(); renderDock(); } },
   // a passi del 5%, tra 50% e 150%; l'intonazione resta uguale
   // velocità della base: il motore prepara la versione rallentata/accelerata
   // (suona naturale) e si riparte dallo stesso punto del brano
